@@ -1,0 +1,7 @@
+--- a/vendor/circle-stdlib/libs/circle/include/circle/sysconfig.h
++++ b/vendor/circle-stdlib/libs/circle/include/circle/sysconfig.h
+@@ -37,3 +37,3 @@
+ #ifndef KERNEL_MAX_SIZE
+-#define KERNEL_MAX_SIZE		(2 * MEGABYTE)
++#define KERNEL_MAX_SIZE		(16 * MEGABYTE)
+ #endif

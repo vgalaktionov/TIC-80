@@ -28,11 +28,18 @@ git clone --recursive https://github.com/nesbox/TIC-80
 cd TIC-80
 ```
 
-Now build circle-stdlib (3 is your RPi model, should build with 2 and 4 too but it's untested):
+Clone the Circle dependency and apply TIC-80's kernel-size configuration before
+building it. Replace `4` with your Raspberry Pi model when needed:
 
 ```
+git clone --recursive https://github.com/smuehlst/circle-stdlib vendor/circle-stdlib
 cd vendor/circle-stdlib
-./configure -r 3
+git checkout db053a32c165c1b22423a47ed6cb5bddc72b51f2
+git submodule update --recursive
+cd ../..
+git apply build/baremetalpi/circle-kernel-size.patch
+cd vendor/circle-stdlib
+./configure -r 4
 make
 ```
 
@@ -51,8 +58,9 @@ cd ../../../../../..
 Build `tic80studio` for arm with baremetal customizations:
 
 ```
+git apply build/baremetalpi/circle.patch
 cd build
-cmake -DCMAKE_BUILD_TYPE=MinSizeRel -DCMAKE_TOOLCHAIN_FILE=baremetalpi/toolchain.cmake ..
+cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE=baremetalpi/toolchain.cmake -DBUILD_WITH_ALL=ON -DBUILD_PRO=ON ..
 make tic80studio
 ```
 
