@@ -9,6 +9,7 @@
 #include <circle/exceptionhandler.h>
 #include <circle/interrupt.h>
 #include "customscreen.h"
+#include "video.h"
 #include <tic80.h>
 #include "utils.h"
 #include <circle/serial.h>
@@ -55,7 +56,8 @@ static        CInterruptSystem   mInterrupt;
 // and output is readable
 static	CScreenDevice      mScreen(1280,720);
 #else
-static	CScreenDevice      mScreen(TIC80_WIDTH, TIC80_HEIGHT);
+static	CScreenDevice      mScreen(TIC80_WIDTH * TIC80_BAREMETAL_SCREEN_SCALE,
+				  TIC80_HEIGHT * TIC80_BAREMETAL_SCREEN_SCALE);
 #endif
 #ifdef SERIAL_DEBUG
 static        CSerialDevice      mSerial;

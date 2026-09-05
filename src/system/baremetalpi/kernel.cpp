@@ -167,15 +167,9 @@ bool tic_sys_keyboard_text(char* text)
     return false;
 }
 
-void screenCopy(CScreenDevice* screen, const u32* ts)
+void screenCopy(CScreenDevice* screen, const u32* source, bool crt)
 {
-    u32 pitch = screen->GetPitch();
-    u32* buf = screen->GetBuffer();
-    for (int y = 0; y < TIC80_HEIGHT; y++)
-    {
-        const u32 *line = ts + ((y+TIC80_OFFSET_TOP)*(TIC80_FULLWIDTH) + TIC80_OFFSET_LEFT);
-        memcpy(buf + (pitch * y), line, TIC80_WIDTH * 4);
-    }
+    tic80_baremetal_render(screen->GetBuffer(), screen->GetPitch(), source, crt);
 }
 
 
@@ -584,7 +578,7 @@ TShutdownMode Run(void)
         if (firstFrame) serialDebug("[tic80] first vsync: ok\n");
 #endif
 
-        screenCopy(&mScreen, product->screen);
+        screenCopy(&mScreen, product->screen, studio_config(platform.studio)->options.crt);
 #ifdef SERIAL_DEBUG
         if (firstFrame)
         {

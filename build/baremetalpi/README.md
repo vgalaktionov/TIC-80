@@ -109,6 +109,13 @@ Copy `build/baremetalpi/wpa_supplicant.conf.example` to the SD card root as
 network uses DHCP. If the configuration file is absent, networking is disabled
 and TIC-80 continues booting normally. Do not commit the configured file.
 
+## CRT monitor
+
+The Raspberry Pi build renders to a 960x544 framebuffer. With the CRT monitor
+disabled, each TIC-80 pixel is copied to an exact 4x4 output block. Enable the
+software CRT effect with F6 or with `OPTIONS > CRT MONITOR`; the setting is
+saved in the normal Studio options file.
+
 # Thanks
 
 This project is built on two awesome projects, [circle](https://github.com/rsta2/circle) and [circle-stdlib](https://github.com/smuehlst/circle-stdlib). Without them, this version of TIC-80 would not exist.

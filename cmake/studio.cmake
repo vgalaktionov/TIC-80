@@ -72,7 +72,7 @@ if(BUILD_PRO)
     target_compile_definitions(tic80studio PRIVATE TIC80_PRO)
 endif()
 
-if(BUILD_SDLGPU)
+if(BUILD_SDLGPU OR BAREMETALPI)
     target_compile_definitions(tic80studio PUBLIC CRT_SHADER_SUPPORT)
 endif()
 
