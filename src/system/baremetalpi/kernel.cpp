@@ -44,6 +44,7 @@ static char keyboardModifiers;
 // mouse status
 static int mousex;
 static int mousey;
+static int mousewheel;
 static unsigned mousebuttons;
 
 // gamepad status
@@ -204,6 +205,10 @@ void mouseStatusHandler (unsigned nButtons, int nDisplacementX, int nDisplacemen
     if (mousey < 0) mousey = 0;
     if (mousey > TIC80_HEIGHT*MOUSE_SENS) mousey = TIC80_HEIGHT*MOUSE_SENS;
 
+    mousewheel += nWheelMove;
+    if (mousewheel < -32) mousewheel = -32;
+    if (mousewheel > 31) mousewheel = 31;
+
     mousebuttons = nButtons;
     keyspinlock.Release();
 }
@@ -233,6 +238,9 @@ void inputToTic()
     if (mousebuttons & 0x04) tic_input->mouse.middle = true; else tic_input->mouse.middle = false;
     tic_input->mouse.x = mousex/MOUSE_SENS + TIC80_OFFSET_LEFT;
     tic_input->mouse.y = mousey/MOUSE_SENS + TIC80_OFFSET_TOP;
+    tic_input->mouse.scrollx = 0;
+    tic_input->mouse.scrolly = mousewheel;
+    mousewheel = 0;
 
     // keyboard
     tic_input->gamepads.first.data = 0;
@@ -359,6 +367,7 @@ static void mouseRemovedHandler(CDevice*, void*)
     keyspinlock.Acquire();
     pMouse = NULL;
     mousebuttons = 0;
+    mousewheel = 0;
     keyspinlock.Release();
     serialDebug("[tic80] mouse: removed\n");
 }
