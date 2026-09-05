@@ -52,6 +52,7 @@ option(BUILD_PLAYER "Build standalone players" ${BUILD_PLAYER_DEFAULT})
 option(BUILD_TOUCH_INPUT "Build with touch input support" ${BUILD_TOUCH_INPUT_DEFAULT})
 option(BUILD_NO_OPTIMIZATION "Build without optimizations for debugging" OFF)
 option(BUILD_ASAN_DEBUG "Build with AddressSanitizer" OFF)
+option(BUILD_TESTS "Build TIC-80 tests" OFF)
 option(BUILD_WITH_ZLIB "Build with zlib linked" ON)
 option(TIC80_TARGET "Target binary suffix")
 option(PREFER_SYSTEM_LIBRARIES "Prefer link with system libraries" OFF)
@@ -192,3 +193,14 @@ include(cmake/n3ds.cmake)
 include(cmake/nswitch.cmake)
 
 include(cmake/install.cmake)
+
+if(BUILD_TESTS)
+    enable_testing()
+    add_executable(fat_datetime_tests
+        tests/fat_datetime.c
+        src/studio/fat_datetime.c)
+    target_include_directories(fat_datetime_tests PRIVATE
+        ${CMAKE_SOURCE_DIR}/include
+        ${CMAKE_SOURCE_DIR}/src/studio)
+    add_test(NAME fat_datetime COMMAND fat_datetime_tests)
+endif()

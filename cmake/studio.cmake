@@ -10,6 +10,7 @@ set(TIC80STUDIO_SRC
     ${TIC80LIB_DIR}/studio/screens/start.c
     ${TIC80LIB_DIR}/studio/studio.c
     ${TIC80LIB_DIR}/studio/config.c
+    ${TIC80LIB_DIR}/studio/fat_datetime.c
     ${TIC80LIB_DIR}/studio/fs.c
     ${TIC80LIB_DIR}/ext/md5.c
     ${TIC80LIB_DIR}/ext/json.c

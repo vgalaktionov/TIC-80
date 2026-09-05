@@ -22,6 +22,7 @@
 
 #include "studio.h"
 #include "fs.h"
+#include "fat_datetime.h"
 #include "net.h"
 #include "ext/json.h"
 
@@ -797,7 +798,11 @@ u64 fs_date(const char* path)
 {
 #if defined(BAREMETALPI)
     dbg("fs_date %s\n", path);
-    // TODO BAREMETALPI
+    FILINFO info;
+
+    if(f_stat(path, &info) == FR_OK && !(info.fattrib & AM_DIR))
+        return fat_datetime_to_unix(info.fdate, info.ftime);
+
     return 0;
 #else
     struct tic_stat_struct s;
