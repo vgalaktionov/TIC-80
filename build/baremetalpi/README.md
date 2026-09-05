@@ -94,6 +94,10 @@ Read the README.md in this folder to see what files needs to be copied to your R
 
 You can create a `tic80` folder into your SD card to put your carts in.
 
+The included `boot/config.txt` forces both Raspberry Pi 4 HDMI outputs to
+1080p60. This keeps a signal active when a KVM does not expose monitor EDID or
+hotplug state while another input is selected.
+
 ## Wi-Fi
 
 For Raspberry Pi 4 Wi-Fi, copy these files into `firmware/` on the SD card:
