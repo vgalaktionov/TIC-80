@@ -398,7 +398,6 @@ void fs_enum(const char* path, fs_list_callback callback, void* data)
 
 void tic_fs_enum(tic_fs* fs, fs_list_callback onItem, fs_done_callback onDone, void* data)
 {
-#ifndef BAREMETALPI
     if (isRoot(fs) && !onItem(PublicDir, NULL, NULL, 0, data, true))
     {
         onDone(data);
@@ -416,8 +415,6 @@ void tic_fs_enum(tic_fs* fs, fs_list_callback onItem, fs_done_callback onDone, v
 
         return;
     }
-#endif
-
 #endif
 
     const char* path = tic_fs_path(fs, "");
@@ -788,11 +785,6 @@ static void fileByHashLoaded(const net_get_data* netData)
 
 void tic_fs_hashload(tic_fs* fs, const char* name, const char* hash, fs_load_callback callback, void* data)
 {
-#if defined(BAREMETALPI)
-    // TODO BAREMETALPI
-    return;
-#else
-
     char cachePath[TICNAME_MAX];
     snprintf(cachePath, sizeof cachePath, TIC_CACHE "%s.tic", hash);
 
@@ -813,8 +805,6 @@ void tic_fs_hashload(tic_fs* fs, const char* name, const char* hash, fs_load_cal
 
     LoadFileByHashData loadFileByHashData = { fs, callback, data, strdup(cachePath) };
     tic_net_get(fs->net, path, fileByHashLoaded, MOVE(loadFileByHashData));
-#endif
-
 #endif
 }
 

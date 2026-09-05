@@ -15,12 +15,17 @@ BAREMETALSYSTEM = $(TIC80SRC)/system/baremetalpi
 
 OBJS    = \
     $(BAREMETALSYSTEM)/main.o $(BAREMETALSYSTEM)/kernel.o $(BAREMETALSYSTEM)/customchargenerator.o \
-    $(BAREMETALSYSTEM)/customscreen.o $(BAREMETALSYSTEM)/utils.o $(BAREMETALSYSTEM)/gamepads.o
+    $(BAREMETALSYSTEM)/customscreen.o $(BAREMETALSYSTEM)/utils.o $(BAREMETALSYSTEM)/gamepads.o \
+    $(BAREMETALSYSTEM)/net.o
 
 include $(CIRCLEHOME)/Rules.mk
 
 CFLAGS += -I "$(NEWLIBDIR)/include" -I $(STDDEF_INCPATH) -I $(CIRCLESTDLIB)/include -I $(TIC80HOME)/include -I $(TIC80SRC) \
       -I $(TIC80STUDIOSRC) -I $(TIC80BUILD) -D BAREMETALPI
+
+ifeq ($(SERIAL_DEBUG),1)
+CFLAGS += -D SERIAL_DEBUG
+endif
 
 LIBS :=  \
     $(TIC80LIB)/libtic80studio.a \
@@ -61,7 +66,15 @@ LIBS :=  \
     $(CIRCLEHOME)/lib/input/libinput.a \
     $(CIRCLEHOME)/lib/fs/fat/libfatfs.a \
     $(CIRCLEHOME)/lib/fs/libfs.a \
+    $(CIRCLEHOME)/addon/wlan/hostap/wpa_supplicant/libwpa_supplicant.a \
+    $(CIRCLEHOME)/addon/wlan/libwlan.a \
     $(CIRCLEHOME)/lib/net/libnet.a \
     $(CIRCLEHOME)/lib/sched/libsched.a \
     $(CIRCLEHOME)/lib/libcircle.a \
     $(NEWLIBDIR)/lib/libm.a
+
+# Rules.mk is included before LIBS is assigned, so add the library
+# prerequisites after the assignment to keep relinks dependency-correct.
+$(TARGET).img: $(LIBS)
+
+-include $(DEPS)

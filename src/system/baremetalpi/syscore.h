@@ -15,8 +15,11 @@
 #include <circle/timer.h>
 #include <circle/logger.h>
 #include <circle/usb/usbhcidevice.h>
+#include <circle/sound/usbsoundbasedevice.h>
 #include <SDCard/emmc.h>
 #include <fatfs/ff.h>
+#include <wlan/bcm4343.h>
+#include <wlan/hostap/wpa_supplicant/wpasupplicant.h>
 
 #ifdef HDMI_SOUND
   #include <vc4/vchiq/vchiqdevice.h>
@@ -38,6 +41,8 @@
 #define MOUSE_SENS 2
 #define SAMPLE_RATE 44100
 #define CHUNK_SIZE 4000
+#define WLAN_FIRMWARE_PATH "SD:/firmware/"
+#define WLAN_CONFIG_FILE "SD:/wpa_supplicant.conf"
 
 static        CActLED            mActLED;
 static        CKernelOptions     mOptions;
@@ -52,155 +57,225 @@ static	CScreenDevice      mScreen(1280,720);
 #else
 static	CScreenDevice      mScreen(TIC80_WIDTH, TIC80_HEIGHT);
 #endif
+#ifdef SERIAL_DEBUG
+static        CSerialDevice      mSerial;
+#else
 static        CSerialDevice      mSerial(&mInterrupt);
+#endif
 static        CTimer             mTimer(&mInterrupt);
+#ifdef SERIAL_DEBUG
+static        CLogger		mLogger(LogDebug, &mTimer);
+#else
 static        CLogger		mLogger(LogWarning /*mOptions.GetLogLevel ()*/, &mTimer);
-static        CUSBHCIDevice	mDWHCI (&mInterrupt, &mTimer);
+#endif
+static        CUSBHCIDevice	mDWHCI (&mInterrupt, &mTimer, TRUE);
 static        CEMMCDevice     mEMMC(&mInterrupt, &mTimer, &mActLED);
 static        CConsole        mConsole(&mScreen);
-static	FATFS		mFileSystem;
+static	FATFS		mSDFileSystem;
+static	FATFS		mUSBFileSystem;
 static	CScheduler		mScheduler;
+static CBcm4343Device mWLAN(WLAN_FIRMWARE_PATH);
+static CNetSubSystem mNet(NULL, NULL, NULL, NULL, "tic80", NetDeviceTypeWLAN);
+static CWPASupplicant mWPASupplicant(WLAN_CONFIG_FILE);
 static CUSBKeyboardDevice *pKeyboard = NULL;
 static CMouseDevice *pMouse= NULL;
 
 static CSoundBaseDevice	*mSound;
+static CUSBSoundBaseDevice *mUSBSound = NULL;
+static const char* TIC80_STORAGE_ROOT = "SD:/tic80";
+static boolean mNetworkInitialized = false;
 
+#ifdef SERIAL_DEBUG
+static boolean mSerialReady = false;
+
+static void serialDebug(const char* message)
+{
+	if (mSerialReady)
+	{
+		mSerial.Write(message, strlen(message));
+	}
+}
+#else
+static void serialDebug(const char*)
+{
+}
+#endif
 
 boolean Die(const char *msg)
 {
+	serialDebug("[tic80] FATAL: ");
+	serialDebug(msg);
+	serialDebug("\n");
 	dbg("FATAL\n");
 	dbg(msg);
 	dbg("\n");
+#ifndef SERIAL_DEBUG
 	CTimer::SimpleMsDelay(100000);
+#endif
 	return false;
 }
 
 
 boolean initializeCore()
 {
-	if(!mInterrupt.Initialize ())
+#ifdef SERIAL_DEBUG
+	if (!mSerial.Initialize(115200))
 	{
 		return false;
 	}
-	if (!mScreen.Initialize ())
-        {
-        	return false;
-        }
-
-	if (!mSerial.Initialize (921600))
-        {
-		return false;
-	}
-	mSerial.RegisterMagicReceivedHandler ("REBOOT", reboot); // for hot deploy
-
-        CDevice *pTarget = mDeviceNameService.GetDevice (mOptions.GetLogDevice (), false);
-	if (pTarget == 0)
-        {
-        	pTarget = &mScreen;
-	}
-
-        //if (!mLogger.Initialize (pTarget))
-        if (!mLogger.Initialize (&mNullDevice))
-        {
-        	return false;
-	}
-
-	if(!mTimer.Initialize ())
-	{
-		return false;
-	}
-
- 	if (!mEMMC.Initialize ())
-	{
-                return false;
-	}
-
-            /*    CDevice * const pPartition =
-                        mDeviceNameService.GetDevice (CSTDLIBAPP_DEFAULT_PARTITION, true);
-                if (pPartition == 0)
-                {
-                        mLogger.Write (GetKernelName (), LogError,
-                                       "Partition not found: %s", mpPartitionName);
-
-                        return false;
-                }*/
-
-                /*if (!mFileSystem.Mount (pPartition))
-                {
-                        mLogger.Write (GetKernelName (), LogError,
-                                         "Cannot mount partition: %s", mpPartitionName);
-                        return false;
-                }*/
-
-	if (!mDWHCI.Initialize ())
-	{
-		return false;
-        }
-
-	if (!mConsole.Initialize ())
-	{
-        	return false;
-	}
-
-#ifdef HDMI_SOUND
-	// use HDMI sound, which need initialization
-	CMemorySystem *mMemory = new CMemorySystem();
-
-	CVCHIQDevice *mVCHIQ = new CVCHIQDevice(mMemory, &mInterrupt);
-	if (!(mVCHIQ->Initialize ()))
-        {
-                        return false;
-        }
-	mSound = new CVCHIQSoundBaseDevice(mVCHIQ, SAMPLE_RATE, CHUNK_SIZE,  (TVCHIQSoundDestination) mOptions.GetSoundOption ()); //VCHIQSoundDestinationHDMI);
-#else
-	// jack audio
-	mSound = new CPWMSoundBaseDevice (&mInterrupt, SAMPLE_RATE, CHUNK_SIZE);
+	mSerialReady = true;
+	serialDebug("[tic80] serial: ok (115200 8N1, polling)\n");
 #endif
 
+	if (!mInterrupt.Initialize())
+	{
+		serialDebug("[tic80] interrupt: FAILED\n");
+		return false;
+	}
+	serialDebug("[tic80] interrupt: ok\n");
 
-        // Initialize newlib stdio with a reference to Circle's file system and console
-	CGlueStdioInit (mConsole);
+#ifndef SERIAL_DEBUG
+	if (!mSerial.Initialize(921600))
+	{
+		return false;
+	}
+	mSerial.RegisterMagicReceivedHandler("REBOOT", reboot); // for hot deploy
+#endif
 
-	if (f_mount (&mFileSystem, "SD:", 1) != FR_OK) {
-		Die("Cannot mount drive");
+	serialDebug("[tic80] screen: begin\n");
+	if (!mScreen.Initialize())
+	{
+		serialDebug("[tic80] screen: FAILED\n");
+		return false;
+	}
+	serialDebug("[tic80] screen: ok\n");
+
+#ifdef SERIAL_DEBUG
+	if (!mLogger.Initialize(&mSerial))
+#else
+	if (!mLogger.Initialize(&mNullDevice))
+#endif
+	{
+		serialDebug("[tic80] logger: FAILED\n");
+		return false;
+	}
+	serialDebug("[tic80] logger: ok\n");
+
+	serialDebug("[tic80] timer: begin\n");
+	if (!mTimer.Initialize())
+	{
+		serialDebug("[tic80] timer: FAILED\n");
+		return false;
+	}
+	serialDebug("[tic80] timer: ok\n");
+
+	serialDebug("[tic80] emmc: begin\n");
+	if (!mEMMC.Initialize())
+	{
+		serialDebug("[tic80] emmc: FAILED\n");
+		return false;
+	}
+	serialDebug("[tic80] emmc: ok\n");
+
+	serialDebug("[tic80] usb: begin\n");
+	if (!mDWHCI.Initialize(FALSE))
+	{
+		serialDebug("[tic80] usb: FAILED\n");
+		return false;
+	}
+	serialDebug("[tic80] usb: ok (device scan deferred)\n");
+
+	serialDebug("[tic80] console: begin\n");
+	if (!mConsole.Initialize())
+	{
+		serialDebug("[tic80] console: FAILED\n");
+		return false;
+	}
+	serialDebug("[tic80] console: ok\n");
+
+#ifdef HDMI_SOUND
+	serialDebug("[tic80] vchiq memory: begin\n");
+	CMemorySystem *mMemory = new CMemorySystem();
+	serialDebug("[tic80] vchiq memory: ok\n");
+	serialDebug("[tic80] vchiq device: begin\n");
+	CVCHIQDevice *mVCHIQ = new CVCHIQDevice(mMemory, &mInterrupt);
+	serialDebug("[tic80] vchiq device: ok\n");
+	serialDebug("[tic80] vchiq initialize: begin\n");
+	if (!mVCHIQ->Initialize())
+	{
+		serialDebug("[tic80] vchiq initialize: FAILED\n");
+		return false;
+	}
+	serialDebug("[tic80] vchiq initialize: ok\n");
+	serialDebug("[tic80] HDMI sound device: begin\n");
+	mSound = new CVCHIQSoundBaseDevice(mVCHIQ, SAMPLE_RATE, CHUNK_SIZE,
+		(TVCHIQSoundDestination) mOptions.GetSoundOption());
+	serialDebug("[tic80] HDMI sound device: ok\n");
+#else
+	mSound = new CPWMSoundBaseDevice(&mInterrupt, SAMPLE_RATE, CHUNK_SIZE);
+#endif
+
+	CGlueStdioInit(mConsole);
+	serialDebug("[tic80] stdio: ok\n");
+
+	serialDebug("[tic80] mount SD: begin\n");
+	if (f_mount(&mSDFileSystem, "SD:", 1) != FR_OK)
+	{
+		serialDebug("[tic80] mount SD: FAILED\n");
+		return Die("Cannot mount SD drive");
+	}
+	serialDebug("[tic80] mount SD: ok\n");
+
+	serialDebug("[tic80] mount USB: begin\n");
+	if (f_mount(&mUSBFileSystem, "USB:", 1) != FR_OK)
+	{
+		serialDebug("[tic80] mount USB: unavailable; keeping SD\n");
+	}
+	else
+	{
+		serialDebug("[tic80] mount USB: ok\n");
 	}
 
-	if (f_mount (&mFileSystem, "USB:", 1) != FR_OK) {
-		if (f_mount (&mFileSystem, "SD:", 1) != FR_OK) {
-			Die("Cannot mount drive");
+	serialDebug("[tic80] storage folder: begin\n");
+	FRESULT folderResult = f_mkdir(TIC80_STORAGE_ROOT);
+	if (folderResult != FR_OK && folderResult != FR_EXIST)
+	{
+		serialDebug("[tic80] storage folder: FAILED\n");
+		return Die("Cannot create TIC-80 storage folder");
+	}
+	serialDebug("[tic80] storage folder: ok\n");
+
+	FILINFO wifiConfig;
+	if (f_stat(WLAN_CONFIG_FILE, &wifiConfig) == FR_OK)
+	{
+		serialDebug("[tic80] Wi-Fi: firmware begin\n");
+		if (!mWLAN.Initialize())
+		{
+			serialDebug("[tic80] Wi-Fi: firmware FAILED\n");
+		}
+		else if (!mNet.Initialize(FALSE))
+		{
+			serialDebug("[tic80] Wi-Fi: network stack FAILED\n");
+		}
+		else if (!mWPASupplicant.Initialize())
+		{
+			serialDebug("[tic80] Wi-Fi: supplicant FAILED\n");
+		}
+		else
+		{
+			mNetworkInitialized = true;
+			serialDebug("[tic80] Wi-Fi: connecting\n");
 		}
 	}
-
-	pKeyboard = (CUSBKeyboardDevice *) mDeviceNameService.GetDevice ("ukbd1", FALSE);
-	/*
-	keep going in "surf mode"
-	if (pKeyboard == 0)
+	else
 	{
-		return Die("Keyboard not found");
-	}*/
-
-	pMouse = (CMouseDevice *) mDeviceNameService.GetDevice ("mouse1", FALSE);
-	if (pMouse == 0)
-	{
-		dbg("Mouse not found");
+		serialDebug("[tic80] Wi-Fi: no wpa_supplicant.conf; disabled\n");
 	}
-
 
 	CScreenDevice* screen = &mScreen;
 	dbg("Screen is:\n");
 	dbg("%d x %d pitch: %d\n", screen->GetWidth(), screen->GetHeight(), screen->GetPitch());
 
-	CLogger::Get()->Write("TEST", LogError, "Test Logging!");
-	dbg("data:\n");
-	//dbg("Memory: %p\n", &mMemory);
-	//dbg("Snd: %p\n", &mVCHIQSound);
-
-
-
-	dbg("Creating tic80 instance..\n");
-
-
+	serialDebug("[tic80] core initialization: ok\n");
 	return true;
-
 }
-

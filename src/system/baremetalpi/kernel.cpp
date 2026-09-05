@@ -311,6 +311,20 @@ void inputToTic()
 }
 void KeyStatusHandlerRaw (unsigned char ucModifiers, const unsigned char RawKeys[6])
 {
+#ifdef SERIAL_DEBUG
+    static boolean firstKeyReport = true;
+    boolean hasKey = ucModifiers != 0;
+    for (unsigned i = 0; i < 6 && !hasKey; i++)
+    {
+        hasKey = RawKeys[i] != 0;
+    }
+    if (firstKeyReport && hasKey)
+    {
+        serialDebug("[tic80] keyboard input: ok\n");
+        firstKeyReport = false;
+    }
+#endif
+
     // this gets called with whatever key is currently pressed in RawKeys
     // (plus modifiers).
     keyspinlock.Acquire();
@@ -319,51 +333,205 @@ void KeyStatusHandlerRaw (unsigned char ucModifiers, const unsigned char RawKeys
     keyspinlock.Release();
 }
 
+static void keyboardRemovedHandler(CDevice*, void*)
+{
+    keyspinlock.Acquire();
+    pKeyboard = NULL;
+    keyboardModifiers = 0;
+    memset(keyboardRawKeys, 0, sizeof keyboardRawKeys);
+    keyspinlock.Release();
+    serialDebug("[tic80] keyboard: removed\n");
+}
+
+static void mouseRemovedHandler(CDevice*, void*)
+{
+    keyspinlock.Acquire();
+    pMouse = NULL;
+    mousebuttons = 0;
+    keyspinlock.Release();
+    serialDebug("[tic80] mouse: removed\n");
+}
+
+static void updateUSBInputDevices()
+{
+    static boolean firstUpdate = true;
+    static unsigned rescanFrames = 0;
+    static boolean firstFallbackScan = true;
+
+    if (firstUpdate)
+    {
+        serialDebug("[tic80] USB plug-and-play scan: begin\n");
+    }
+
+    boolean updated = mDWHCI.UpdatePlugAndPlay();
+    boolean rescanned = false;
+
+    if (firstUpdate)
+    {
+        serialDebug("[tic80] USB plug-and-play scan: returned\n");
+        firstUpdate = false;
+    }
+
+    // Some KVM hubs do not signal downstream port changes reliably. Poll the
+    // hub tree at a low rate so devices that appear after hub setup are found.
+    if ((!pKeyboard || !pMouse) && ++rescanFrames >= TIC80_FRAMERATE)
+    {
+        rescanFrames = 0;
+
+        if (firstFallbackScan)
+        {
+            serialDebug("[tic80] USB fallback rescan: begin\n");
+        }
+
+        mDWHCI.ReScanDevices();
+        rescanned = true;
+
+        if (firstFallbackScan)
+        {
+            serialDebug("[tic80] USB fallback rescan: returned\n");
+            firstFallbackScan = false;
+        }
+    }
+    else if (pKeyboard && pMouse)
+    {
+        rescanFrames = 0;
+    }
+
+    if (!updated && !rescanned)
+    {
+        return;
+    }
+
+    if (updated)
+    {
+        serialDebug("[tic80] USB topology: changed\n");
+    }
+
+    if (!pKeyboard)
+    {
+        pKeyboard = (CUSBKeyboardDevice *) mDeviceNameService.GetDevice("ukbd1", FALSE);
+        if (pKeyboard)
+        {
+            pKeyboard->RegisterRemovedHandler(keyboardRemovedHandler);
+            pKeyboard->RegisterKeyStatusHandlerRaw(KeyStatusHandlerRaw);
+            serialDebug("[tic80] keyboard: attached\n");
+        }
+    }
+
+    if (!pMouse)
+    {
+        pMouse = (CMouseDevice *) mDeviceNameService.GetDevice("mouse1", FALSE);
+        if (pMouse)
+        {
+            pMouse->RegisterRemovedHandler(mouseRemovedHandler);
+            pMouse->RegisterStatusHandler(mouseStatusHandler);
+            serialDebug("[tic80] mouse: attached\n");
+        }
+    }
+
+    initGamepads(mDeviceNameService, gamePadStatusHandler);
+}
+
+static void updateUSBSoundDevice()
+{
+    CDevice* audioControl = mDeviceNameService.GetDevice("uaudioctl1", FALSE);
+
+    if (!audioControl)
+    {
+        if (mUSBSound && !mUSBSound->IsActive())
+        {
+            delete mUSBSound;
+            mUSBSound = NULL;
+            serialDebug("[tic80] USB sound: removed\n");
+        }
+
+        return;
+    }
+
+    if (!mUSBSound)
+    {
+        serialDebug("[tic80] USB sound: begin\n");
+        mUSBSound = new CUSBSoundBaseDevice(SAMPLE_RATE);
+        if (!mUSBSound->AllocateQueue(1000))
+        {
+            delete mUSBSound;
+            mUSBSound = NULL;
+            serialDebug("[tic80] USB sound: queue allocation FAILED\n");
+            return;
+        }
+
+        // TIC-80 produces signed 16-bit stereo. Circle maps it to the first
+        // two USB output channels and silences any additional channels.
+        mUSBSound->SetWriteFormat(SoundFormatSigned16, 2);
+    }
+
+    if (!mUSBSound->IsActive())
+    {
+        if (mUSBSound->Start())
+        {
+            serialDebug("[tic80] USB sound: attached\n");
+        }
+        else
+        {
+            serialDebug("[tic80] USB sound: start deferred\n");
+        }
+    }
+}
+
+CNetSubSystem* getTIC80NetSubsystem()
+{
+    return mNetworkInitialized ? &mNet : NULL;
+}
+
+void tic80SerialDebug(const char* message)
+{
+    serialDebug(message);
+}
+
+static void updateNetworkStatus()
+{
+    static boolean reported = false;
+
+    if (!reported && mNetworkInitialized && mNet.IsRunning())
+    {
+        CString address;
+        mNet.GetConfig()->GetIPAddress()->Format(&address);
+
+        CString message;
+        message.Format("[tic80] Wi-Fi: connected, IP %s\n", (const char*)address);
+        serialDebug((const char*)message);
+        reported = true;
+    }
+}
+
 TShutdownMode Run(void)
 {
-    initializeCore();
+    if (!initializeCore())
+    {
+        serialDebug("[tic80] core initialization: FAILED; halting\n");
+        return ShutdownHalt;
+    }
     mLogger.Write (KN, LogNotice, "TIC80 Port");
 
-    f_mkdir("tic80");
+    serialDebug("[tic80] studio_create: begin\n");
 
     dbg("Calling studio init instance..\n");
 
-    if (pKeyboard)
-    {
-        dbg("With keyboard\n");
-        char  arg0[] = "xxkernel";
-        char* argv[] = { &arg0[0], NULL };
-        int argc = 1;
-        platform.studio = studio_create(argc, argv, 44100, TIC80_PIXEL_COLOR_BGRA8888, "tic80", INT32_MAX, tic_layout_qwerty);
-    }
-    else
-    {
-        //  if no keyboard, start in surf mode!
-        char  arg0[] = "xxkernel";
-        char  arg1[] = "--cmd=surf";
-        char* argv[] = { &arg0[0], &arg1[0], NULL };
-        int argc = 2;
-        dbg("Without keyboard\n");
-        platform.studio = studio_create(argc, argv, 44100, TIC80_PIXEL_COLOR_BGRA8888, "tic80", INT32_MAX, tic_layout_qwerty);
-    }
+    char arg0[] = "xxkernel";
+    char* argv[] = {&arg0[0], NULL};
+    platform.studio = studio_create(1, argv, 44100, TIC80_PIXEL_COLOR_BGRA8888,
+                                    TIC80_STORAGE_ROOT, INT32_MAX, tic_layout_qwerty);
     dbg("studio_create OK\n");
+    serialDebug("[tic80] studio_create: returned\n");
 
     if( !platform.studio)
     {
         Die("Could not init studio");
+        return ShutdownHalt;
     }
+    serialDebug("[tic80] studio_create: ok\n");
 
     dbg("Studio init ok..\n");
-
-    if (pKeyboard){
-        pKeyboard->RegisterKeyStatusHandlerRaw (KeyStatusHandlerRaw);
-    }
-
-    initGamepads(mDeviceNameService, gamePadStatusHandler);
-
-    if (pMouse) {
-        pMouse->RegisterStatusHandler (mouseStatusHandler);
-    }
 
     const tic80* product = &studio_mem(platform.studio)->product;
     tic80_input* tic_input = &platform.input;
@@ -373,12 +541,19 @@ TShutdownMode Run(void)
     mSound->AllocateQueue(1000);
     mSound->SetWriteFormat(SoundFormatSigned16);
 
+    serialDebug("[tic80] sound: begin\n");
     if (!mSound->Start())
     {
         Die("Could not start sound.");
+        return ShutdownHalt;
     }
+    serialDebug("[tic80] sound: ok\n");
 
     // MAIN LOOP
+#ifdef SERIAL_DEBUG
+    boolean firstFrame = true;
+#endif
+    serialDebug("[tic80] main loop: entered\n");
     while(true)
     {
         keyspinlock.Acquire();
@@ -386,13 +561,41 @@ TShutdownMode Run(void)
         keyspinlock.Release();
 
         studio_tick(platform.studio, platform.input);
+#ifdef SERIAL_DEBUG
+        if (firstFrame) serialDebug("[tic80] first tick: ok\n");
+#endif
         studio_sound(platform.studio);
+#ifdef SERIAL_DEBUG
+        if (firstFrame) serialDebug("[tic80] first sound mix: ok\n");
+#endif
 
         mSound->Write(product->samples.buffer, product->samples.count * TIC80_SAMPLESIZE);
+        if (mUSBSound && mUSBSound->IsActive())
+        {
+            mUSBSound->Write(product->samples.buffer,
+                             product->samples.count * TIC80_SAMPLESIZE);
+        }
+#ifdef SERIAL_DEBUG
+        if (firstFrame) serialDebug("[tic80] first audio write: ok\n");
+#endif
 
         mScreen.vsync();
+#ifdef SERIAL_DEBUG
+        if (firstFrame) serialDebug("[tic80] first vsync: ok\n");
+#endif
 
         screenCopy(&mScreen, product->screen);
+#ifdef SERIAL_DEBUG
+        if (firstFrame)
+        {
+            serialDebug("[tic80] first frame copy: ok\n");
+            firstFrame = false;
+        }
+#endif
+
+        updateUSBInputDevices();
+        updateUSBSoundDevice();
+        updateNetworkStatus();
 
         mScheduler.Yield(); // for sound
     }

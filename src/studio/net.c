@@ -29,7 +29,7 @@
 
 #define URL_SIZE 2048
 
-#if defined(__3DS__) || defined(__SWITCH__)
+#if defined(__3DS__) || defined(__SWITCH__) || defined(BAREMETALPI)
 
 // See net.c in src/system
 
