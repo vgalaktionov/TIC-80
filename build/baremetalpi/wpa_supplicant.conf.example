@@ -1,0 +1,9 @@
+# Set this to the two-letter country code where the Pi is used.
+country=US
+
+network={
+	ssid="YOUR_WIFI_NAME"
+	psk="YOUR_WIFI_PASSWORD"
+	proto=WPA2
+	key_mgmt=WPA-PSK
+}

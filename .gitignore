@@ -194,3 +194,17 @@ build/*.map
 # 3ds files
 *.3dsx
 *.smdh
+
+# Raspberry Pi bare-metal local builds and credentials
+/vendor/circle-stdlib/
+/build/rpi4-*-sd/
+/build/tic80-rpi4-baremetal-*/
+/build/tic80-rpi4-baremetal-*.zip
+/build/runtime_versions.h
+/build/baremetalpi/kernel*.elf
+/build/baremetalpi/kernel*.img
+/build/baremetalpi/kernel*.lst
+/build/baremetalpi/kernel*.map
+/build/baremetalpi/wpa_supplicant.conf
+/src/system/baremetalpi/*.d
+/src/system/baremetalpi/*.o

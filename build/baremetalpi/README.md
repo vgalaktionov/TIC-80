@@ -55,6 +55,16 @@ make
 cd ../../../../../..
 ```
 
+Build the on-board Wi-Fi driver and download its firmware:
+
+```
+cd vendor/circle-stdlib/libs/circle/addon/wlan
+./makeall --nosample
+cd firmware
+make firmware
+cd ../../../../../../..
+```
+
 Build `tic80studio` for arm with baremetal customizations:
 
 ```
@@ -83,6 +93,21 @@ make
 Read the README.md in this folder to see what files needs to be copied to your RPI. For RPi3 should be ok to copy all of them
 
 You can create a `tic80` folder into your SD card to put your carts in.
+
+## Wi-Fi
+
+For Raspberry Pi 4 Wi-Fi, copy these files into `firmware/` on the SD card:
+
+```
+brcmfmac43455-sdio.bin
+brcmfmac43455-sdio.clm_blob
+brcmfmac43455-sdio.txt
+```
+
+Copy `build/baremetalpi/wpa_supplicant.conf.example` to the SD card root as
+`wpa_supplicant.conf`, then set its `country`, `ssid`, and `psk` values. The
+network uses DHCP. If the configuration file is absent, networking is disabled
+and TIC-80 continues booting normally. Do not commit the configured file.
 
 # Thanks
 
