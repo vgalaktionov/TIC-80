@@ -750,11 +750,13 @@ static void tick(Surf* surf)
 
     studio_menu_anim(surf->tic, surf->ticks++);
 
-    if (isIdle(surf) && surf->menu.count > 0)
+    if (isIdle(surf))
     {
-        processGamepad(surf);
         if(tic_api_keyp(tic, tic_key_escape, -1, -1))
             setStudioMode(surf->studio, TIC_CONSOLE_MODE);
+
+        if(surf->menu.count > 0)
+            processGamepad(surf);
     }
 
     if (getStudioMode(surf->studio) != TIC_SURF_MODE) return;
