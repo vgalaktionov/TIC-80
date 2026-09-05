@@ -11,16 +11,18 @@
 #include <cstring>
 #include <tic80.h>
 
-static inline uint32_t scaleColor(uint32_t color, unsigned brightness,
-                                  unsigned redMask, unsigned greenMask, unsigned blueMask)
+static inline unsigned attenuateChannel(unsigned value, unsigned firstShift,
+                                        unsigned secondShift)
 {
-    unsigned blue = color & 0xff;
-    unsigned green = (color >> 8) & 0xff;
-    unsigned red = (color >> 16) & 0xff;
+    return value - (value >> firstShift) - (secondShift ? value >> secondShift : 0);
+}
 
-    red = red * brightness * redMask >> 16;
-    green = green * brightness * greenMask >> 16;
-    blue = blue * brightness * blueMask >> 16;
+static inline uint32_t attenuate(uint32_t color, unsigned firstShift,
+                                 unsigned secondShift = 0)
+{
+    const unsigned blue = attenuateChannel(color & 0xff, firstShift, secondShift);
+    const unsigned green = attenuateChannel((color >> 8) & 0xff, firstShift, secondShift);
+    const unsigned red = attenuateChannel((color >> 16) & 0xff, firstShift, secondShift);
 
     return 0xff000000 | red << 16 | green << 8 | blue;
 }
@@ -38,6 +40,31 @@ static inline uint32_t blurPixel(const uint32_t* line, int x)
                           + ((right >> 16) & 0xff)) >> 3;
 
     return 0xff000000 | red << 16 | green << 8 | blue;
+}
+
+static inline void writeMask(uint32_t* output, const uint32_t colors[3], unsigned phase)
+{
+    switch (phase)
+    {
+    case 0:
+        output[0] = colors[0];
+        output[1] = colors[1];
+        output[2] = colors[2];
+        output[3] = colors[0];
+        break;
+    case 1:
+        output[0] = colors[1];
+        output[1] = colors[2];
+        output[2] = colors[0];
+        output[3] = colors[1];
+        break;
+    default:
+        output[0] = colors[2];
+        output[1] = colors[0];
+        output[2] = colors[1];
+        output[3] = colors[2];
+        break;
+    }
 }
 
 static void copyNearest(uint32_t* output, unsigned outputPitch, const uint32_t* source)
@@ -69,38 +96,52 @@ static void copyNearest(uint32_t* output, unsigned outputPitch, const uint32_t* 
 
 static void copyCrt(uint32_t* output, unsigned outputPitch, const uint32_t* source)
 {
-    static const unsigned ScanlineBrightness[TIC80_BAREMETAL_SCREEN_SCALE] =
-        {224, 256, 240, 176};
-    static const unsigned PhosphorMask[3][3] =
-    {
-        {256, 216, 216},
-        {216, 256, 216},
-        {216, 216, 256},
-    };
-
     for (int y = 0; y < TIC80_HEIGHT; y++)
     {
         const uint32_t* inputLine = source + (y + TIC80_MARGIN_TOP) * TIC80_FULLWIDTH
                                     + TIC80_MARGIN_LEFT;
+        uint32_t* outputRows[TIC80_BAREMETAL_SCREEN_SCALE];
+        for (unsigned row = 0; row < TIC80_BAREMETAL_SCREEN_SCALE; row++)
+        {
+            outputRows[row] = output + outputPitch
+                               * (y * TIC80_BAREMETAL_SCREEN_SCALE + row);
+        }
+
+        unsigned phase = 0;
 
         for (int x = 0; x < TIC80_WIDTH; x++)
         {
             const uint32_t color = blurPixel(inputLine, x);
-
-            for (unsigned row = 0; row < TIC80_BAREMETAL_SCREEN_SCALE; row++)
+            const uint32_t dim = attenuate(color, 3, 5);
+            const uint32_t phosphor[3] =
             {
-                uint32_t* pixel = output + outputPitch
-                                  * (y * TIC80_BAREMETAL_SCREEN_SCALE + row)
-                                  + x * TIC80_BAREMETAL_SCREEN_SCALE;
+                (dim & ~0x00ff0000) | (color & 0x00ff0000),
+                (dim & ~0x0000ff00) | (color & 0x0000ff00),
+                (dim & ~0x000000ff) | (color & 0x000000ff),
+            };
+            uint32_t scanline[3];
 
-                for (unsigned column = 0; column < TIC80_BAREMETAL_SCREEN_SCALE; column++)
-                {
-                    const unsigned* mask =
-                        PhosphorMask[(x * TIC80_BAREMETAL_SCREEN_SCALE + column) % 3];
-                    pixel[column] = scaleColor(color, ScanlineBrightness[row],
-                                               mask[0], mask[1], mask[2]);
-                }
+            for (unsigned index = 0; index < 3; index++)
+            {
+                scanline[index] = attenuate(phosphor[index], 3);
             }
+            writeMask(outputRows[0] + x * TIC80_BAREMETAL_SCREEN_SCALE, scanline, phase);
+
+            writeMask(outputRows[1] + x * TIC80_BAREMETAL_SCREEN_SCALE, phosphor, phase);
+
+            for (unsigned index = 0; index < 3; index++)
+            {
+                scanline[index] = attenuate(phosphor[index], 4);
+            }
+            writeMask(outputRows[2] + x * TIC80_BAREMETAL_SCREEN_SCALE, scanline, phase);
+
+            for (unsigned index = 0; index < 3; index++)
+            {
+                scanline[index] = attenuate(phosphor[index], 2, 4);
+            }
+            writeMask(outputRows[3] + x * TIC80_BAREMETAL_SCREEN_SCALE, scanline, phase);
+
+            if (++phase == 3) phase = 0;
         }
     }
 }

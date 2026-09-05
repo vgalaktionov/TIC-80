@@ -72,6 +72,7 @@ static struct
     } keyboard;
 
     char* clipboard;
+    u32* screenBuffer;
 
 } platform;
 
@@ -169,7 +170,23 @@ bool tic_sys_keyboard_text(char* text)
 
 void screenCopy(CScreenDevice* screen, const u32* source, bool crt)
 {
-    tic80_baremetal_render(screen->GetBuffer(), screen->GetPitch(), source, crt);
+    const unsigned width = TIC80_WIDTH * TIC80_BAREMETAL_SCREEN_SCALE;
+    const unsigned height = TIC80_HEIGHT * TIC80_BAREMETAL_SCREEN_SCALE;
+
+    tic80_baremetal_render(platform.screenBuffer, width, source, crt);
+
+    if (screen->GetPitch() == width)
+    {
+        memcpy(screen->GetBuffer(), platform.screenBuffer, width * height * sizeof(u32));
+    }
+    else
+    {
+        for (unsigned row = 0; row < height; row++)
+        {
+            memcpy(screen->GetBuffer() + screen->GetPitch() * row,
+                   platform.screenBuffer + width * row, width * sizeof(u32));
+        }
+    }
 }
 
 
@@ -530,6 +547,15 @@ TShutdownMode Run(void)
     const tic80* product = &studio_mem(platform.studio)->product;
     tic80_input* tic_input = &platform.input;
     tic_input->keyboard.data = 0;
+
+    platform.screenBuffer = (u32*) malloc(TIC80_WIDTH * TIC80_HEIGHT
+                                          * TIC80_BAREMETAL_SCREEN_SCALE
+                                          * TIC80_BAREMETAL_SCREEN_SCALE * sizeof(u32));
+    if (!platform.screenBuffer)
+    {
+        Die("Could not allocate video buffer");
+        return ShutdownHalt;
+    }
 
     // sound system
     mSound->AllocateQueue(1000);
