@@ -62,6 +62,7 @@ bool    fs_exists   (const char* name);
 bool    fs_isdir    (const char* path);
 void*   fs_read     (const char* path, s32* size);
 bool    fs_write    (const char* path, const void* data, s32 size);
+bool    fs_write_atomic(const char* path, const void* data, s32 size);
 void    fs_enum     (const char* path, fs_list_callback callback, void* data);
 
 const char* fs_apppath();

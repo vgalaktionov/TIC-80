@@ -120,6 +120,30 @@ disabled, each TIC-80 pixel is copied to an exact 4x4 output block. Enable the
 software CRT effect with F6 or with `OPTIONS > CRT MONITOR`; the setting is
 saved in the normal Studio options file.
 
+## Live code import and export
+
+The bare-metal build can synchronize the active code editor with a file. Copy
+`build/baremetalpi/cmdline.txt.example` to the SD card root as `cmdline.txt`,
+then configure exactly one of these modes:
+
+```
+codeexport=code.lua delay=30
+codeimport=USB:/code.lua delay=30
+```
+
+Relative paths are resolved below `SD:/tic80`. Paths beginning with `SD:/` or
+`USB:/` select that mounted volume directly. Raspberry Pi command-line entries
+cannot contain spaces. `delay` is the number of TIC-80 frames between checks;
+omit it to synchronize every frame. Export uses a temporary file and backup so
+an interrupted write does not replace the last complete source file. Import
+retains the existing `-- pos: x,y` cursor-position protocol.
+
+This synchronizes source code only; it does not create a publishable cartridge.
+To publish a game, run `save mygame` in the TIC-80 console, shut down the Pi,
+mount the SD card on another computer, and upload `tic80/mygame.tic` through
+the cartridge publishing form on `tic80.com`. Surf can browse and download
+cartridges, but it cannot upload them.
+
 # Thanks
 
 This project is built on two awesome projects, [circle](https://github.com/rsta2/circle) and [circle-stdlib](https://github.com/smuehlst/circle-stdlib). Without them, this version of TIC-80 would not exist.

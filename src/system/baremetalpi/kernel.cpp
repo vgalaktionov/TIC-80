@@ -537,9 +537,33 @@ TShutdownMode Run(void)
 
     dbg("Calling studio init instance..\n");
 
-    char arg0[] = "xxkernel";
-    char* argv[] = {&arg0[0], NULL};
-    platform.studio = studio_create(1, argv, 44100, TIC80_PIXEL_COLOR_BGRA8888,
+    char arg0[] = "tic80";
+    char codeOption[TICNAME_MAX + 16];
+    char delayOption[32];
+    char* argv[] = {arg0, codeOption, delayOption, NULL};
+    int argc = 1;
+
+    const char* codeExport = mOptions.GetAppOptionString("codeexport");
+    const char* codeImport = mOptions.GetAppOptionString("codeimport");
+    if (codeExport && *codeExport)
+    {
+        snprintf(codeOption, sizeof codeOption, "--codeexport=%s", codeExport);
+        argc++;
+    }
+    else if (codeImport && *codeImport)
+    {
+        snprintf(codeOption, sizeof codeOption, "--codeimport=%s", codeImport);
+        argc++;
+    }
+
+    const char* delay = mOptions.GetAppOptionString("delay");
+    if (argc > 1 && delay && *delay)
+    {
+        snprintf(delayOption, sizeof delayOption, "--delay=%s", delay);
+        argc++;
+    }
+
+    platform.studio = studio_create(argc, argv, 44100, TIC80_PIXEL_COLOR_BGRA8888,
                                     TIC80_STORAGE_ROOT, INT32_MAX, tic_layout_qwerty);
     dbg("studio_create OK\n");
     serialDebug("[tic80] studio_create: returned\n");

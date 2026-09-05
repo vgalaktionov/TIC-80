@@ -2356,9 +2356,27 @@ static void processMouseStates(Studio* studio)
 }
 
 #if defined(BUILD_EDITORS)
+static const char* codeSyncPath(Studio* studio, const char* path)
+{
+#if defined(BAREMETALPI)
+    return strncmp(path, "SD:/", 4) == 0 || strncmp(path, "USB:/", 5) == 0
+        ? path
+        : tic_fs_pathroot(studio->fs, path);
+#else
+    return path;
+#endif
+}
+
+static void codeSyncResult(Studio* studio, bool success, const char* error)
+{
+    if(!success && !studio->bytebattle.ioError)
+        showPopupMessage(studio, error);
+
+    studio->bytebattle.ioError = !success;
+}
+
 static void doCodeExport(Studio* studio)
 {
-#ifndef BAREMETALPI
     char pos[sizeof studio->bytebattle.last.postag];
     {
         s32 x = 0, y = 0;
@@ -2374,70 +2392,91 @@ static void doCodeExport(Studio* studio)
 
     if(strcmp(studio->bytebattle.last.postag, pos) || strcmp(studio->bytebattle.last.code.data, studio->code->src))
     {
-        FILE* file = fopen(studio->bytebattle.exp, "wb");
+        const s32 posSize = strlen(pos);
+        const s32 codeSize = strlen(studio->code->src);
+        const s32 size = posSize + codeSize;
+        u8* data = malloc(size);
+        bool success = false;
 
-        if(file)
+        if(data)
         {
-            strcpy(studio->bytebattle.last.postag, pos);
-            strcpy(studio->bytebattle.last.code.data, studio->code->src);
+            memcpy(data, pos, posSize);
+            memcpy(data + posSize, studio->code->src, codeSize);
 
-            fwrite(pos, 1, strlen(pos), file);
-            fwrite(studio->code->src, 1, strlen(studio->code->src), file);
-            fclose(file);
+            success = fs_write_atomic(codeSyncPath(studio, studio->bytebattle.exp), data, size);
+            free(data);
+
+            if(success)
+            {
+                strcpy(studio->bytebattle.last.postag, pos);
+                strcpy(studio->bytebattle.last.code.data, studio->code->src);
+            }
         }
+
+        codeSyncResult(studio, success, "code export failed :(");
     }
-#endif
 }
 
 static void doCodeImport(Studio* studio)
 {
-#ifndef BAREMETALPI
-    FILE* file = fopen(studio->bytebattle.imp, "rb");
+    s32 size = 0;
+    char* data = fs_read(codeSyncPath(studio, studio->bytebattle.imp), &size);
+    bool success = false;
 
-    if(file)
+    if(data)
     {
-        static tic_code code;
-        code.data[fread(code.data, 1, sizeof(tic_code), file)] = '\0';
-
-        char* end = strchr(code.data, '\n');
+        char* end = memchr(data, '\n', size);
 
         if(end)
         {
             static const char PosTag[] = "-- pos: ";
             enum{TagSize = sizeof PosTag - 1};
 
-            if(memcmp(code.data, PosTag, TagSize) == 0)
+            if(size >= TagSize && memcmp(data, PosTag, TagSize) == 0)
             {
-                char* start = code.data + TagSize;
-                char* sep = strchr(start, ',');
+                char* start = data + TagSize;
+                char* sep = memchr(start, ',', end - start);
 
                 if(sep)
                 {
                     *sep = *end = '\0';
-                    s32 x = atoi(start);
-                    s32 y = atoi(sep + 1);
+                    char* xEnd = NULL;
+                    char* yEnd = NULL;
+                    s32 x = strtol(start, &xEnd, 10);
+                    s32 y = strtol(sep + 1, &yEnd, 10);
 
-                    if(x == 0 && y == 0)
+                    if(xEnd != start && *xEnd == '\0' && yEnd != sep + 1 && *yEnd == '\0')
                     {
-                        if(studio->mode != TIC_RUN_MODE)
-                            runGame(studio);
-                    }
-                    else
-                    {
-                        s32 offset = end - code.data + 1;
-                        memcpy(studio->code->src, code.data + offset, sizeof(tic_code) - offset);
-                        codeSetPos(studio->code, x - 1, y - 1);
+                        s32 offset = end - data + 1;
+                        s32 codeSize = size - offset;
 
-                        if(studio->mode == TIC_RUN_MODE)
-                            setStudioMode(studio, TIC_CODE_MODE);
+                        if(x == 0 && y == 0)
+                        {
+                            if(studio->mode != TIC_RUN_MODE)
+                                runGame(studio);
+
+                            success = true;
+                        }
+                        else if(codeSize < (s32)sizeof studio->bytebattle.last.code.data)
+                        {
+                            memset(studio->code->src, 0, sizeof studio->bytebattle.last.code.data);
+                            memcpy(studio->code->src, data + offset, codeSize);
+                            codeSetPos(studio->code, x - 1, y - 1);
+
+                            if(studio->mode == TIC_RUN_MODE)
+                                setStudioMode(studio, TIC_CODE_MODE);
+
+                            success = true;
+                        }
                     }
                 }
             }
         }
 
-        fclose(file);
+        free(data);
     }
-#endif
+
+    codeSyncResult(studio, success, "code import failed :(");
 }
 #endif
 

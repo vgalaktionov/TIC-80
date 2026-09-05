@@ -228,6 +228,7 @@ static int _wstat_win32_shim(const wchar_t* path, struct _stat* buffer)
     #define tic_stat _wstat
 #endif
 #define tic_remove _wremove
+#define tic_rename _wrename
 #define tic_fopen _wfopen
 #define tic_mkdir(name) _wmkdir(name)
 #define tic_strncpy wcsncpy
@@ -255,6 +256,7 @@ typedef char FsString;
 #define tic_rmdir rmdir
 #define tic_stat stat
 #define tic_remove remove
+#define tic_rename rename
 #define tic_fopen fopen
 #define tic_mkdir(name) mkdir(name, 0777)
 #define tic_strncpy strncpy
@@ -594,6 +596,9 @@ void tic_fs_isdir_async(tic_fs* fs, const char* name, fs_isdir_callback callback
 
 bool fs_write(const char* name, const void* buffer, s32 size)
 {
+    if(!name || size < 0 || (size > 0 && !buffer))
+        return false;
+
 #if defined(BAREMETALPI)
     dbg("fs_write %s\n", name);
     FIL File;
@@ -603,12 +608,12 @@ bool fs_write(const char* name, const void* buffer, s32 size)
         return false;
     }
 
-    u32 written=0;
+    UINT written = 0;
 
     res = f_write(&File, buffer, size, &written);
+    FRESULT closeResult = f_close(&File);
 
-    f_close(&File);
-    if (res != FR_OK)
+    if (res != FR_OK || closeResult != FR_OK)
     {
         return false;
     }
@@ -625,18 +630,99 @@ bool fs_write(const char* name, const void* buffer, s32 size)
 
     if(file)
     {
-        fwrite(buffer, 1, size, file);
-        fclose(file);
+        size_t written = fwrite(buffer, 1, size, file);
+        bool success = written == (size_t)size && fclose(file) == 0;
 
 #if defined(__EMSCRIPTEN__)
-        syncfs();
+        if(success)
+            syncfs();
 #endif
 
-        return true;
+        return success;
     }
 
     return false;
 #endif
+}
+
+static bool removeFile(const char* path)
+{
+    if(!fs_exists(path))
+        return true;
+
+    const FsString* pathString = utf8ToString(path);
+#if defined(BAREMETALPI)
+    bool result = f_unlink(pathString) == FR_OK;
+#else
+    bool result = tic_remove(pathString) == 0;
+#endif
+    freeString(pathString);
+
+    return result;
+}
+
+static bool renameFile(const char* from, const char* to)
+{
+    const FsString* fromString = utf8ToString(from);
+    const FsString* toString = utf8ToString(to);
+#if defined(BAREMETALPI)
+    bool result = f_rename(fromString, toString) == FR_OK;
+#else
+    bool result = tic_rename(fromString, toString) == 0;
+#endif
+    freeString(toString);
+    freeString(fromString);
+
+    return result;
+}
+
+bool fs_write_atomic(const char* path, const void* data, s32 size)
+{
+    char temp[TICNAME_MAX];
+    char backup[TICNAME_MAX];
+
+    if(!path || size < 0 || (size > 0 && !data)
+        || snprintf(temp, sizeof temp, "%s.tmp", path) >= (s32)sizeof temp
+        || snprintf(backup, sizeof backup, "%s.bak", path) >= (s32)sizeof backup)
+        return false;
+
+    // Recover the previous version if power was lost after it was backed up.
+    if(!fs_exists(path) && fs_exists(backup) && !renameFile(backup, path))
+        return false;
+
+    if(!removeFile(temp) || (fs_exists(backup) && !removeFile(backup)))
+        return false;
+
+    if(!fs_write(temp, data, size))
+    {
+        removeFile(temp);
+        return false;
+    }
+
+    bool hadOriginal = fs_exists(path);
+    if(hadOriginal && !renameFile(path, backup))
+    {
+        removeFile(temp);
+        return false;
+    }
+
+    if(!renameFile(temp, path))
+    {
+        if(hadOriginal)
+            renameFile(backup, path);
+
+        removeFile(temp);
+        return false;
+    }
+
+    if(hadOriginal)
+        removeFile(backup);
+
+#if defined(__EMSCRIPTEN__)
+    syncfs();
+#endif
+
+    return true;
 }
 
 void* fs_read(const char* path, s32* size)

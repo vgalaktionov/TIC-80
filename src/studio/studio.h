@@ -318,6 +318,7 @@ typedef struct
 
     s32 delay;
     s32 ticks;
+    bool ioError;
 
     struct
     {
