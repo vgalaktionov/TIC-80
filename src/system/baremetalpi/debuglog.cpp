@@ -18,7 +18,8 @@ namespace
 {
 static const unsigned LogCapacity = 256 * 1024;
 static const unsigned RequestCapacity = 2048;
-static const unsigned IoTimeoutMs = 5000;
+static const unsigned RequestTimeoutMs = 5000;
+static const unsigned ResponseChunkSize = 4096;
 static const unsigned PollMs = 10;
 
 static Tic80LogRing<LogCapacity> Log;
@@ -32,24 +33,19 @@ static boolean containsHeaderEnd(const char* request, unsigned length)
 
 static boolean deadlineExpired(unsigned start)
 {
-    return static_cast<unsigned>(CTimer::GetClockTicks() - start) >= IoTimeoutMs * 1000;
+    return static_cast<unsigned>(CTimer::GetClockTicks() - start) >= RequestTimeoutMs * 1000;
 }
 
 static boolean sendAll(CSocket* socket, const void* data, unsigned length)
 {
     const char* bytes = static_cast<const char*>(data);
     unsigned sent = 0;
-    const unsigned start = CTimer::GetClockTicks();
-
-    while (sent < length && !deadlineExpired(start))
+    while (sent < length)
     {
-        int result = socket->Send(bytes + sent, length - sent, MSG_DONTWAIT);
-        if (result < 0) return FALSE;
-        if (result == 0)
-        {
-            CScheduler::Get()->MsSleep(PollMs);
-            continue;
-        }
+        const unsigned remaining = length - sent;
+        const unsigned chunk = remaining < ResponseChunkSize ? remaining : ResponseChunkSize;
+        const int result = socket->Send(bytes + sent, chunk, 0);
+        if (result != static_cast<int>(chunk)) return FALSE;
 
         sent += static_cast<unsigned>(result);
     }
