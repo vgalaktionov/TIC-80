@@ -174,6 +174,11 @@ void screenCopy(CScreenDevice* screen, const u32* source, bool crt)
     const unsigned width = TIC80_WIDTH * TIC80_BAREMETAL_SCREEN_SCALE;
     const unsigned height = TIC80_HEIGHT * TIC80_BAREMETAL_SCREEN_SCALE;
 
+    if (crt && tic80_baremetal_v3d_render(source))
+    {
+        return;
+    }
+
     tic80_baremetal_render(platform.screenBuffer, width, source, crt);
 
     if (screen->GetPitch() == width)
@@ -520,6 +525,8 @@ static void updateNetworkStatus()
         CString message;
         message.Format("[tic80] Wi-Fi: connected, IP %s\n", (const char*)address);
         serialDebug((const char*)message);
+        message.Format("[tic80] debug log: http://%s:8080/\n", (const char*)address);
+        serialDebug((const char*)message);
         reported = true;
     }
 }
@@ -589,6 +596,9 @@ TShutdownMode Run(void)
         Die("Could not allocate video buffer");
         return ShutdownHalt;
     }
+
+    serialDebug("[tic80] V3D CRT: initialize\n");
+    tic80_baremetal_v3d_initialize(mScreen.GetBuffer(), mScreen.GetPitch());
 
     // sound system
     mSound->AllocateQueue(1000);

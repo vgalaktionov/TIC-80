@@ -113,12 +113,20 @@ Copy `build/baremetalpi/wpa_supplicant.conf.example` to the SD card root as
 network uses DHCP. If the configuration file is absent, networking is disabled
 and TIC-80 continues booting normally. Do not commit the configured file.
 
+Once DHCP succeeds, the kernel debug log is available at
+`http://<Pi IP address>:8080/`. The 256 KiB circular buffer starts before the
+network, so the response includes boot diagnostics emitted before Wi-Fi was
+ready. The endpoint has no authentication and should only be used on a trusted
+local network.
+
 ## CRT monitor
 
 The Raspberry Pi build renders to a 960x544 framebuffer. With the CRT monitor
 disabled, each TIC-80 pixel is copied to an exact 4x4 output block. Enable the
-software CRT effect with F6 or with `OPTIONS > CRT MONITOR`; the setting is
-saved in the normal Studio options file.
+GPU-accelerated CRT effect with F6 or with `OPTIONS > CRT MONITOR`; the setting
+is saved in the normal Studio options file. If V3D initialization or rendering
+fails, TIC-80 records the controller state in the debug log and falls back to
+the software CRT renderer.
 
 ## Live code import and export
 

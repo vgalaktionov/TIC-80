@@ -10,6 +10,7 @@
 #include <circle/interrupt.h>
 #include "customscreen.h"
 #include "video.h"
+#include "debuglog.h"
 #include <tic80.h>
 #include "utils.h"
 #include <circle/serial.h>
@@ -34,6 +35,7 @@
 #include <circle/sched/scheduler.h>
 #include <circle/net/netsubsystem.h>
 #include <circle/startup.h>
+#include <circle/device.h>
 
 #include <circle_glue.h>
 
@@ -48,7 +50,6 @@
 static        CActLED            mActLED;
 static        CKernelOptions     mOptions;
 static       CDeviceNameService mDeviceNameService;
-static        CNullDevice        mNullDevice;
 static        CExceptionHandler  mExceptionHandler;
 static        CInterruptSystem   mInterrupt;
 #ifdef EN_DEBUG
@@ -65,11 +66,7 @@ static        CSerialDevice      mSerial;
 static        CSerialDevice      mSerial(&mInterrupt);
 #endif
 static        CTimer             mTimer(&mInterrupt);
-#ifdef SERIAL_DEBUG
 static        CLogger		mLogger(LogDebug, &mTimer);
-#else
-static        CLogger		mLogger(LogWarning /*mOptions.GetLogLevel ()*/, &mTimer);
-#endif
 static        CUSBHCIDevice	mDWHCI (&mInterrupt, &mTimer, TRUE);
 static        CEMMCDevice     mEMMC(&mInterrupt, &mTimer, &mActLED);
 static        CConsole        mConsole(&mScreen);
@@ -86,20 +83,39 @@ static CSoundBaseDevice	*mSound;
 static CUSBSoundBaseDevice *mUSBSound = NULL;
 static const char* TIC80_STORAGE_ROOT = "SD:/tic80";
 static boolean mNetworkInitialized = false;
-
 #ifdef SERIAL_DEBUG
 static boolean mSerialReady = false;
+#endif
 
+class CDebugLogDevice : public CDevice
+{
+public:
+	int Write(const void* buffer, size_t count) override
+	{
+		if (count > 0x7fffffffu) return -1;
+		tic80DebugLogWriteBytes(buffer, static_cast<unsigned>(count));
+#ifdef SERIAL_DEBUG
+		if (mSerialReady) mSerial.Write(buffer, count);
+#endif
+		return static_cast<int>(count);
+	}
+};
+
+static CDebugLogDevice mDebugLogDevice;
+
+#ifdef SERIAL_DEBUG
 static void serialDebug(const char* message)
 {
+	tic80DebugLogWrite(message);
 	if (mSerialReady)
 	{
 		mSerial.Write(message, strlen(message));
 	}
 }
 #else
-static void serialDebug(const char*)
+static void serialDebug(const char* message)
 {
+	tic80DebugLogWrite(message);
 }
 #endif
 
@@ -152,11 +168,7 @@ boolean initializeCore()
 	}
 	serialDebug("[tic80] screen: ok\n");
 
-#ifdef SERIAL_DEBUG
-	if (!mLogger.Initialize(&mSerial))
-#else
-	if (!mLogger.Initialize(&mNullDevice))
-#endif
+	if (!mLogger.Initialize(&mDebugLogDevice))
 	{
 		serialDebug("[tic80] logger: FAILED\n");
 		return false;
@@ -266,6 +278,7 @@ boolean initializeCore()
 		else
 		{
 			mNetworkInitialized = true;
+			tic80DebugLogServerStart(&mNet);
 			serialDebug("[tic80] Wi-Fi: connecting\n");
 		}
 	}

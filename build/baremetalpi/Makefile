@@ -16,7 +16,8 @@ BAREMETALSYSTEM = $(TIC80SRC)/system/baremetalpi
 OBJS    = \
     $(BAREMETALSYSTEM)/main.o $(BAREMETALSYSTEM)/kernel.o $(BAREMETALSYSTEM)/customchargenerator.o \
     $(BAREMETALSYSTEM)/customscreen.o $(BAREMETALSYSTEM)/utils.o $(BAREMETALSYSTEM)/gamepads.o \
-    $(BAREMETALSYSTEM)/net.o $(BAREMETALSYSTEM)/video.o
+    $(BAREMETALSYSTEM)/net.o $(BAREMETALSYSTEM)/video.o \
+    $(BAREMETALSYSTEM)/debuglog.o $(BAREMETALSYSTEM)/v3d_renderer.o
 
 include $(CIRCLEHOME)/Rules.mk
 

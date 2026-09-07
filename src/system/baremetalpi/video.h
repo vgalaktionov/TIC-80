@@ -14,3 +14,6 @@ static const unsigned TIC80_BAREMETAL_SCREEN_SCALE = 4;
 
 void tic80_baremetal_render(uint32_t* output, unsigned outputPitch,
                             const uint32_t* source, bool crt);
+
+bool tic80_baremetal_v3d_initialize(uint32_t* framebuffer, unsigned framebufferPitch);
+bool tic80_baremetal_v3d_render(const uint32_t* source);
