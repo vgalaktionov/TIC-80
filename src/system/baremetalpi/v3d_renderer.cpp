@@ -790,15 +790,27 @@ static bool resetControlThreads()
     V3D_write(V3D_CLE_CT1CS, V3D_CLE_CTNCS_CTRSTA);
     DataSyncBarrier();
 
-    // Tolerate a retained user-halt state before accepting work. Clearing
-    // CTSUBS is harmless while CA == EA and makes the next queue runnable.
-    clearControlThreadHalt(V3D_CLE_CT0CS);
-    clearControlThreadHalt(V3D_CLE_CT1CS);
-    const uint32_t invalid = V3dCleControlThreadRun
-                             | V3dCleControlThreadSubMode
-                             | V3D_CLE_CTNCS_CTERR;
+    // CTSUBS is the normal stopped-at-halt state. Leave it asserted until a
+    // fresh CA/EA pair has been queued, then clear it to start that list.
+    const uint32_t invalid = V3dCleControlThreadRun | V3D_CLE_CTNCS_CTERR;
     return !(V3D_read(V3D_CLE_CT0CS) & invalid)
            && !(V3D_read(V3D_CLE_CT1CS) & invalid);
+}
+
+static void logControlThreadState(const char* label)
+{
+    char message[256];
+    snprintf(message, sizeof message,
+             "[tic80] V3D CRT: %s ct0cs=%08lx ct1cs=%08lx "
+             "ct0=%08lx/%08lx ct1=%08lx/%08lx\n",
+             label,
+             static_cast<unsigned long>(V3D_read(V3D_CLE_CT0CS)),
+             static_cast<unsigned long>(V3D_read(V3D_CLE_CT1CS)),
+             static_cast<unsigned long>(V3D_read(V3dCleCt0Ca)),
+             static_cast<unsigned long>(V3D_read(V3dCleCt0Ea)),
+             static_cast<unsigned long>(V3D_read(V3D_CLE_CT1CA)),
+             static_cast<unsigned long>(V3D_read(V3dCleCt1Ea)));
+    tic80SerialDebug(message);
 }
 
 static WaitResult waitForCount(bool rendering, uint8_t previous)
@@ -950,6 +962,7 @@ bool tic80_baremetal_v3d_initialize(uint32_t* framebuffer, unsigned framebufferP
     CleanAndInvalidateDataCacheRange(reinterpret_cast<u32>(aligned), Gpu.arena.used);
     if (!resetControlThreads())
     {
+        logControlThreadState("control-thread reset failed");
         tic80SerialDebug("[tic80] V3D CRT: control-thread reset failed; using CPU renderer\n");
         return false;
     }
