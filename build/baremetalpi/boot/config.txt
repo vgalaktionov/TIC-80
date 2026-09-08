@@ -1,12 +1,11 @@
-# Keep both Pi 4 HDMI outputs active when a KVM hides hotplug/EDID at boot.
-hdmi_force_hotplug=1
-hdmi_drive=2
-hdmi_group=1
-hdmi_mode=16
-
-hdmi_force_hotplug:1=1
-hdmi_drive:1=2
-hdmi_group:1=1
-hdmi_mode:1=16
+# Circle renders to display 0 (the HDMI port nearest USB-C). Keep its signal
+# independent of the hotplug and EDID state exposed by a KVM.
+hdmi_force_hotplug:0=1
+hdmi_ignore_edid:0=0xa5000080
+hdmi_force_edid_audio:0=1
+hdmi_drive:0=2
+hdmi_group:0=1
+hdmi_mode:0=16
+max_framebuffers=1
 
 scaling_kernel=8

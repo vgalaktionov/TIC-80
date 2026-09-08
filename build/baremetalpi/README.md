@@ -94,9 +94,10 @@ Read the README.md in this folder to see what files needs to be copied to your R
 
 You can create a `tic80` folder into your SD card to put your carts in.
 
-The included `boot/config.txt` forces both Raspberry Pi 4 HDMI outputs to
-1080p60. This keeps a signal active when a KVM does not expose monitor EDID or
-hotplug state while another input is selected.
+The included `boot/config.txt` forces HDMI0 (the micro-HDMI port nearest the
+USB-C power connector) to 1080p60 without relying on EDID or hotplug state.
+Use HDMI0 for KVM connections; Circle renders the TIC-80 framebuffer to that
+display.
 
 ## Wi-Fi
 
@@ -117,7 +118,9 @@ Once DHCP succeeds, the kernel debug log is available at
 `http://<Pi IP address>:8080/`. The 256 KiB circular buffer starts before the
 network, so the response includes boot diagnostics emitted before Wi-Fi was
 ready. The endpoint has no authentication and should only be used on a trusted
-local network.
+local network. The Circle scheduler is built with room for 64 tasks because
+Wi-Fi, DHCP, VCHIQ audio, HTTP, and the log server can exceed Circle's default
+limit of 20.
 
 ## CRT monitor
 
