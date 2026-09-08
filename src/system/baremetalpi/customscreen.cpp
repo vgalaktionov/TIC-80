@@ -25,6 +25,11 @@
 
 #define ROTORS		4
 
+// Circle's archive uses unsigned int for u32, while the current newlib headers
+// use unsigned long. Call the archive's verified AArch32 symbol explicitly.
+extern "C" boolean BcmFrameBufferSetVirtualOffset (CBcmFrameBuffer *, unsigned, unsigned)
+	asm ("_ZN15CBcmFrameBuffer16SetVirtualOffsetEjj");
+
 enum TScreenState
 {
 	ScreenStateStart,
@@ -834,9 +839,15 @@ void CScreenDevice::vsync ()
  m_pFrameBuffer->WaitForVerticalSync();
 }
 
+boolean CScreenDevice::RefreshDisplay ()
+{
+	return !m_bVirtual && m_pFrameBuffer != 0
+	       ? BcmFrameBufferSetVirtualOffset (m_pFrameBuffer, 0, 0)
+	       : FALSE;
+}
+
 
 TScreenColor* CScreenDevice::GetBuffer ()
 {
       return m_pBuffer;
 }
-

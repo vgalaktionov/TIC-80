@@ -3,4 +3,5 @@
 #include <circle/types.h>
 
 boolean tic80HdmiRecoveryInitialize();
-void tic80HdmiRecoveryPoll();
+boolean tic80HdmiRecoveryPoll();
+boolean tic80HdmiRecoveryCanWaitForVsync();

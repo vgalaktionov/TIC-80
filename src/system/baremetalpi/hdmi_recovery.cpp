@@ -11,14 +11,26 @@
 namespace
 {
 constexpr unsigned AttachDebounceUs = 250000;
+constexpr unsigned PowerOffHoldUs = 500000;
+constexpr unsigned ModeSettleUs = 500000;
+constexpr unsigned CallbackCooldownUs = 1000000;
 constexpr uint32_t HdmiEventNone = 0;
 constexpr uint32_t HdmiEventAttached = 1;
 constexpr uint32_t HdmiEventUnplugged = 2;
 
+enum RecoveryState
+{
+    RecoveryIdle,
+    RecoveryAttachDebounce,
+    RecoveryPowerOffHold,
+    RecoveryModeSettle,
+    RecoveryCallbackCooldown,
+};
+
 VCHI_INSTANCE_T VchiInstance = nullptr;
 volatile uint32_t PendingEvent = HdmiEventNone;
-unsigned AttachDeadline = 0;
-bool AttachDebouncing = false;
+unsigned RecoveryDeadline = 0;
+RecoveryState State = RecoveryIdle;
 bool Initialized = false;
 
 void logResult(const char* operation, int result)
@@ -45,6 +57,27 @@ void tvEvent(void*, uint32_t reason, uint32_t param1, uint32_t param2)
 int assertFixedMode()
 {
     return vc_tv_hdmi_power_on_explicit(HDMI_MODE_HDMI, HDMI_RES_GROUP_CEA, 16);
+}
+
+void logDisplayState(const char* label)
+{
+    TV_DISPLAY_STATE_T state = {};
+    const int result = vc_tv_get_display_state(&state);
+    if (result != 0)
+    {
+        logResult(label, result);
+        return;
+    }
+
+    char message[160];
+    snprintf(message, sizeof message,
+             "[tic80] HDMI recovery: %s state=%08lx %lux%lu@%u\n",
+             label,
+             static_cast<unsigned long>(state.state),
+             static_cast<unsigned long>(state.display.hdmi.width),
+             static_cast<unsigned long>(state.display.hdmi.height),
+             state.display.hdmi.frame_rate);
+    tic80DebugLogWrite(message);
 }
 }
 
@@ -80,53 +113,89 @@ boolean tic80HdmiRecoveryInitialize()
     vc_tv_register_callback(tvEvent, nullptr);
     Initialized = true;
 
-    TV_DISPLAY_STATE_T state = {};
-    result = vc_tv_get_display_state(&state);
-    if (result == 0)
-    {
-        char message[160];
-        snprintf(message, sizeof message,
-                 "[tic80] HDMI recovery: initial state=%08lx %lux%lu@%u\n",
-                 static_cast<unsigned long>(state.state),
-                 static_cast<unsigned long>(state.display.hdmi.width),
-                 static_cast<unsigned long>(state.display.hdmi.height),
-                 state.display.hdmi.frame_rate);
-        tic80DebugLogWrite(message);
-    }
-    else
-    {
-        logResult("initial state query failed", result);
-    }
+    logDisplayState("initial");
 
     result = assertFixedMode();
     logResult("initial 1080p60 mode assertion", result);
     return TRUE;
 }
 
-void tic80HdmiRecoveryPoll()
+boolean tic80HdmiRecoveryPoll()
 {
     if (!Initialized)
     {
-        return;
+        return FALSE;
     }
 
     const uint32_t event = __atomic_exchange_n(&PendingEvent, HdmiEventNone, __ATOMIC_ACQ_REL);
     if (event == HdmiEventUnplugged)
     {
-        AttachDebouncing = false;
-        tic80DebugLogWrite("[tic80] HDMI recovery: display detached\n");
+        if (State == RecoveryIdle || State == RecoveryAttachDebounce)
+        {
+            State = RecoveryIdle;
+            tic80DebugLogWrite("[tic80] HDMI recovery: display detached\n");
+        }
     }
     else if (event == HdmiEventAttached)
     {
-        AttachDeadline = CTimer::GetClockTicks() + AttachDebounceUs;
-        AttachDebouncing = true;
-        tic80DebugLogWrite("[tic80] HDMI recovery: display attached; scheduling retrain\n");
+        if (State == RecoveryIdle || State == RecoveryAttachDebounce)
+        {
+            RecoveryDeadline = CTimer::GetClockTicks() + AttachDebounceUs;
+            State = RecoveryAttachDebounce;
+            tic80DebugLogWrite("[tic80] HDMI recovery: display attached; scheduling link reset\n");
+        }
     }
 
-    if (AttachDebouncing
-        && static_cast<int>(CTimer::GetClockTicks() - AttachDeadline) >= 0)
+    const unsigned now = CTimer::GetClockTicks();
+    if (State == RecoveryAttachDebounce
+        && static_cast<int>(now - RecoveryDeadline) >= 0)
     {
-        AttachDebouncing = false;
-        logResult("hotplug 1080p60 mode assertion", assertFixedMode());
+        const int result = vc_tv_power_off();
+        logResult("hotplug link power off", result);
+        if (result == 0)
+        {
+            RecoveryDeadline = now + PowerOffHoldUs;
+            State = RecoveryPowerOffHold;
+        }
+        else
+        {
+            RecoveryDeadline = now;
+            State = RecoveryPowerOffHold;
+        }
     }
+    else if (State == RecoveryPowerOffHold
+             && static_cast<int>(now - RecoveryDeadline) >= 0)
+    {
+        const int result = assertFixedMode();
+        logResult("hotplug 1080p60 mode restore", result);
+        if (result == 0)
+        {
+            RecoveryDeadline = now + ModeSettleUs;
+            State = RecoveryModeSettle;
+        }
+        else
+        {
+            RecoveryDeadline = now + PowerOffHoldUs;
+        }
+    }
+    else if (State == RecoveryModeSettle
+             && static_cast<int>(now - RecoveryDeadline) >= 0)
+    {
+        logDisplayState("settled");
+        RecoveryDeadline = now + CallbackCooldownUs;
+        State = RecoveryCallbackCooldown;
+        return TRUE;
+    }
+    else if (State == RecoveryCallbackCooldown
+             && static_cast<int>(now - RecoveryDeadline) >= 0)
+    {
+        State = RecoveryIdle;
+    }
+
+    return FALSE;
+}
+
+boolean tic80HdmiRecoveryCanWaitForVsync()
+{
+    return State != RecoveryPowerOffHold && State != RecoveryModeSettle;
 }

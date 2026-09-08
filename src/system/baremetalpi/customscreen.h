@@ -140,6 +140,7 @@ public:
 	void Rotor (unsigned nIndex, unsigned nCount);
 
 	void vsync();
+	boolean RefreshDisplay();
 	TScreenColor* GetBuffer();
 
 

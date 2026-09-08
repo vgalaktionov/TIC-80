@@ -646,10 +646,19 @@ TShutdownMode Run(void)
         if (firstFrame) serialDebug("[tic80] first audio write: ok\n");
 #endif
 
-        mScreen.vsync();
+        if (tic80HdmiRecoveryPoll())
+        {
+            serialDebug(mScreen.RefreshDisplay()
+                            ? "[tic80] HDMI recovery: framebuffer scanout restored\n"
+                            : "[tic80] HDMI recovery: framebuffer scanout restore failed\n");
+        }
+        if (tic80HdmiRecoveryCanWaitForVsync())
+        {
+            mScreen.vsync();
 #ifdef SERIAL_DEBUG
-        if (firstFrame) serialDebug("[tic80] first vsync: ok\n");
+            if (firstFrame) serialDebug("[tic80] first vsync: ok\n");
 #endif
+        }
 
         screenCopy(&mScreen, product->screen, studio_config(platform.studio)->options.crt);
 #ifdef SERIAL_DEBUG
@@ -663,7 +672,6 @@ TShutdownMode Run(void)
         updateUSBInputDevices();
         updateUSBSoundDevice();
         updateNetworkStatus();
-        tic80HdmiRecoveryPoll();
 
         mScheduler.Yield(); // for sound
     }

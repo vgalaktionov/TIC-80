@@ -100,8 +100,9 @@ You can create a `tic80` folder into your SD card to put your carts in.
 
 The included `boot/config.txt` configures HDMI0 (the micro-HDMI port nearest the
 USB-C power connector) for 1080p60 without relying on EDID contents. The
-bare-metal runtime listens for physical hotplug events and reasserts that mode
-after a KVM selects the Pi, so use HDMI0 for KVM connections.
+bare-metal runtime listens for physical hotplug events, briefly power-cycles the
+link, restores 1080p60, and reattaches the framebuffer after a KVM selects the
+Pi. Use HDMI0 for KVM connections.
 
 ## Wi-Fi
 
