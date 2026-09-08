@@ -17,7 +17,8 @@ OBJS    = \
     $(BAREMETALSYSTEM)/main.o $(BAREMETALSYSTEM)/kernel.o $(BAREMETALSYSTEM)/customchargenerator.o \
     $(BAREMETALSYSTEM)/customscreen.o $(BAREMETALSYSTEM)/utils.o $(BAREMETALSYSTEM)/gamepads.o \
     $(BAREMETALSYSTEM)/net.o $(BAREMETALSYSTEM)/video.o \
-    $(BAREMETALSYSTEM)/debuglog.o $(BAREMETALSYSTEM)/v3d_renderer.o
+    $(BAREMETALSYSTEM)/debuglog.o $(BAREMETALSYSTEM)/v3d_renderer.o \
+    $(BAREMETALSYSTEM)/hdmi_recovery.o
 
 include $(CIRCLEHOME)/Rules.mk
 
@@ -57,6 +58,8 @@ LIBS :=  \
     $(MRUBYDIR)/build/target/lib/libmruby.a \
     $(NEWLIBDIR)/lib/libc.a \
     $(NEWLIBDIR)/lib/libcirclenewlib.a \
+    $(CIRCLEHOME)/addon/vc4/interface/vmcs_host/libvmcs_host.a \
+    $(CIRCLEHOME)/addon/vc4/interface/vcos/libvcos.a \
     $(CIRCLEHOME)/addon/vc4/sound/libvchiqsound.a \
     $(CIRCLEHOME)/addon/vc4/vchiq/libvchiq.a \
     $(CIRCLEHOME)/addon/linux/liblinuxemu.a \

@@ -11,6 +11,7 @@
 #include "customscreen.h"
 #include "video.h"
 #include "debuglog.h"
+#include "hdmi_recovery.h"
 #include <tic80.h>
 #include "utils.h"
 #include <circle/serial.h>
@@ -221,6 +222,15 @@ boolean initializeCore()
 		return false;
 	}
 	serialDebug("[tic80] vchiq initialize: ok\n");
+	serialDebug("[tic80] HDMI recovery: begin\n");
+	if (!tic80HdmiRecoveryInitialize())
+	{
+		serialDebug("[tic80] HDMI recovery: unavailable\n");
+	}
+	else
+	{
+		serialDebug("[tic80] HDMI recovery: ready\n");
+	}
 	serialDebug("[tic80] HDMI sound device: begin\n");
 	mSound = new CVCHIQSoundBaseDevice(mVCHIQ, SAMPLE_RATE, CHUNK_SIZE,
 		(TVCHIQSoundDestination) mOptions.GetSoundOption());

@@ -1,6 +1,5 @@
-# Circle renders to display 0 (the HDMI port nearest USB-C). Keep its signal
-# independent of the hotplug and EDID state exposed by a KVM.
-hdmi_force_hotplug:0=1
+# Circle renders to display 0 (the HDMI port nearest USB-C). Ignore the KVM's
+# EDID contents but preserve physical hotplug events for runtime link retraining.
 hdmi_ignore_edid:0=0xa5000080
 hdmi_force_edid_audio:0=1
 hdmi_drive:0=2

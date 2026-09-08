@@ -663,6 +663,7 @@ TShutdownMode Run(void)
         updateUSBInputDevices();
         updateUSBSoundDevice();
         updateNetworkStatus();
+        tic80HdmiRecoveryPoll();
 
         mScheduler.Yield(); // for sound
     }

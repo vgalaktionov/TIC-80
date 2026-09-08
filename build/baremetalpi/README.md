@@ -50,7 +50,11 @@ cd libs/circle/addon/vc4/sound/
 make
 cd ../vchiq
 make
-cd ../../linux
+cd ../interface/vcos
+make
+cd ../vmcs_host
+make
+cd ../../../linux
 make
 cd ../../../../../..
 ```
@@ -94,10 +98,10 @@ Read the README.md in this folder to see what files needs to be copied to your R
 
 You can create a `tic80` folder into your SD card to put your carts in.
 
-The included `boot/config.txt` forces HDMI0 (the micro-HDMI port nearest the
-USB-C power connector) to 1080p60 without relying on EDID or hotplug state.
-Use HDMI0 for KVM connections; Circle renders the TIC-80 framebuffer to that
-display.
+The included `boot/config.txt` configures HDMI0 (the micro-HDMI port nearest the
+USB-C power connector) for 1080p60 without relying on EDID contents. The
+bare-metal runtime listens for physical hotplug events and reasserts that mode
+after a KVM selects the Pi, so use HDMI0 for KVM connections.
 
 ## Wi-Fi
 

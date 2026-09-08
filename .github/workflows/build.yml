@@ -227,7 +227,11 @@ jobs:
           make -j$(nproc)
           cd ../vchiq
           make -j$(nproc)
-          cd ../../linux
+          cd ../interface/vcos
+          make -j$(nproc)
+          cd ../vmcs_host
+          make -j$(nproc)
+          cd ../../../linux
           make -j$(nproc)
 
       - name: Build
@@ -292,7 +296,11 @@ jobs:
           make -j$(nproc)
           cd ../vchiq
           make -j$(nproc)
-          cd ../../linux
+          cd ../interface/vcos
+          make -j$(nproc)
+          cd ../vmcs_host
+          make -j$(nproc)
+          cd ../../../linux
           make -j$(nproc)
 
       - name: Build
