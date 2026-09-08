@@ -46,9 +46,31 @@ static const unsigned ArenaSize = BlurredSize + SourceUifSize + MaskUifSize + Ti
                                   + 64 * 1024;
 static const unsigned CommandTimeoutUs = 250000;
 static const unsigned PowerTimeoutUs = 100000;
+static const unsigned V3dCleCt0Ea = V3D_CORE0 + 0x108;
+static const unsigned V3dCleCt1Ea = V3D_CORE0 + 0x10c;
 static const unsigned V3dCleCt0Ca = V3D_CORE0 + 0x110;
+static const unsigned V3dCleCt0Lc = V3D_CORE0 + 0x120;
 static const unsigned V3dClePcs = V3D_CORE0 + 0x130;
-static const unsigned V3dErrStat = V3D_CORE0 + 0xf20;
+static const unsigned V3dErrorStatus = V3D_CORE0 + 0xf20;
+static const uint32_t V3dCleControlThreadRun = 1u << 5;
+static const uint32_t V3dCleControlThreadSubMode = 1u << 4;
+static const unsigned V3dHubInterruptStatus = V3D_HUB_BASE + 0x50;
+static const unsigned V3dHubInterruptClear = V3D_HUB_BASE + 0x58;
+static const unsigned V3dMmucControl = V3D_HUB_BASE + 0x1000;
+static const uint32_t V3dMmucFlushing = 1u << 2;
+static const unsigned V3dMmuControl = V3D_HUB_BASE + 0x1200;
+static const unsigned V3dMmuAddressCap = V3D_HUB_BASE + 0x1214;
+static const unsigned V3dMmuViolationId = V3D_HUB_BASE + 0x122c;
+static const unsigned V3dMmuIllegalAddress = V3D_HUB_BASE + 0x1230;
+static const unsigned V3dMmuViolationAddress = V3D_HUB_BASE + 0x1234;
+static const unsigned V3dCoreInterruptStatus = V3D_CORE0 + 0x50;
+static const unsigned V3dCoreInterruptClear = V3D_CORE0 + 0x58;
+static const unsigned V3dGmpStatus = V3D_CORE0 + 0x800;
+static const unsigned V3dGmpConfig = V3D_CORE0 + 0x804;
+static const uint32_t V3dGmpReadCountMask = 0x7fu << 16;
+static const uint32_t V3dGmpWriteCountMask = 0x7fu << 24;
+static const uint32_t V3dGmpConfigBusy = 1u << 3;
+static const uint32_t V3dGmpStopRequest = 1u << 1;
 
 static_assert(OutputWidth == 960 && OutputHeight == 544, "V3D layout assumes a 4x TIC-80 output");
 static_assert(SourceUifPaddedHeight == 136, "unexpected source UIF padding");
@@ -705,10 +727,78 @@ static bool powerOn()
     return true;
 }
 
-static void stopControlThreads()
+static bool configureDirectAddressing()
+{
+    // Quiesce AXI before restoring the V3D 4.2 reset-state direct-addressing mode.
+    // The VideoCore firmware may have left translation or protection enabled.
+    V3D_write(V3dGmpConfig, V3dGmpStopRequest);
+    unsigned start = CTimer::GetClockTicks();
+    while (V3D_read(V3dGmpStatus)
+           & (V3dGmpReadCountMask | V3dGmpWriteCountMask | V3dGmpConfigBusy))
+        if (elapsed(start, PowerTimeoutUs)) return false;
+
+    V3D_write(V3dMmucControl, 0);
+    V3D_write(V3dMmuControl, 0);
+    V3D_write(V3dMmuAddressCap, 0);
+    V3D_write(V3dMmuIllegalAddress, 0);
+    V3D_write(V3dHubInterruptClear, 0xffffffffu);
+    V3D_write(V3dCoreInterruptClear, 0xffffffffu);
+    V3D_write(V3dGmpConfig, 0);
+    start = CTimer::GetClockTicks();
+    while (V3D_read(V3dGmpStatus) & V3dGmpConfigBusy)
+        if (elapsed(start, PowerTimeoutUs)) return false;
+    DataSyncBarrier();
+
+    return !(V3D_read(V3dMmuControl) & 1u)
+           && !(V3D_read(V3dMmucControl) & (V3dMmucFlushing | 1u))
+           && !(V3D_read(V3dMmuAddressCap) & 0x80000000u)
+           && !(V3D_read(V3dMmuIllegalAddress) & 0x80000000u)
+           && !(V3D_read(V3dGmpConfig) & (V3dGmpStopRequest | 1u))
+           && !(V3D_read(V3dGmpStatus) & V3dGmpConfigBusy);
+}
+
+static void logAddressState(const char* label)
+{
+    char message[192];
+    snprintf(message, sizeof message,
+             "[tic80] V3D CRT: %s mmuc=%08lx mmu=%08lx cap=%08lx "
+             "illegal=%08lx gmp=%08lx/%08lx\n",
+             label,
+             static_cast<unsigned long>(V3D_read(V3dMmucControl)),
+             static_cast<unsigned long>(V3D_read(V3dMmuControl)),
+             static_cast<unsigned long>(V3D_read(V3dMmuAddressCap)),
+             static_cast<unsigned long>(V3D_read(V3dMmuIllegalAddress)),
+             static_cast<unsigned long>(V3D_read(V3dGmpStatus)),
+             static_cast<unsigned long>(V3D_read(V3dGmpConfig)));
+    tic80SerialDebug(message);
+}
+
+static void clearControlThreadHalt(unsigned controlRegister)
+{
+    const uint32_t status = V3D_read(controlRegister);
+    if ((status & (V3dCleControlThreadRun | V3dCleControlThreadSubMode))
+        == V3dCleControlThreadSubMode)
+    {
+        V3D_write(controlRegister, V3dCleControlThreadSubMode);
+        DataSyncBarrier();
+    }
+}
+
+static bool resetControlThreads()
 {
     V3D_write(V3D_CLE_CT0CS, V3D_CLE_CTNCS_CTRSTA);
     V3D_write(V3D_CLE_CT1CS, V3D_CLE_CTNCS_CTRSTA);
+    DataSyncBarrier();
+
+    // Tolerate a retained user-halt state before accepting work. Clearing
+    // CTSUBS is harmless while CA == EA and makes the next queue runnable.
+    clearControlThreadHalt(V3D_CLE_CT0CS);
+    clearControlThreadHalt(V3D_CLE_CT1CS);
+    const uint32_t invalid = V3dCleControlThreadRun
+                             | V3dCleControlThreadSubMode
+                             | V3D_CLE_CTNCS_CTERR;
+    return !(V3D_read(V3D_CLE_CT0CS) & invalid)
+           && !(V3D_read(V3D_CLE_CT1CS) & invalid);
 }
 
 static WaitResult waitForCount(bool rendering, uint8_t previous)
@@ -721,25 +811,46 @@ static WaitResult waitForCount(bool rendering, uint8_t previous)
         if (current != previous) return WaitComplete;
         const uint32_t status = V3D_read(rendering ? V3D_CLE_CT1CS : V3D_CLE_CT0CS);
         if (status & V3D_CLE_CTNCS_CTERR) return WaitControllerError;
+        clearControlThreadHalt(rendering ? V3D_CLE_CT1CS : V3D_CLE_CT0CS);
     } while (!elapsed(start, CommandTimeoutUs));
     return WaitTimeout;
 }
 
 static void logCommandFailure(const char* stage, WaitResult result)
 {
-    char message[320];
+    char message[640];
     snprintf(message, sizeof message,
              "[tic80] V3D CRT: %s %s; ct0cs=%08lx ct1cs=%08lx "
-             "ct0ca=%08lx ct1ca=%08lx pcs=%08lx err=%08lx bfc=%u rfc=%u; "
+             "ct0=%08lx/%08lx/%08lx ct1=%08lx/%08lx/%08lx "
+             "pcs=%08lx err=%08lx bfc=%u rfc=%u q0=%08lx/%08lx q1=%08lx/%08lx "
+             "qts=%08lx hubint=%08lx coreint=%08lx "
+             "mmuc=%08lx mmu=%08lx vio=%08lx/%08lx gmp=%08lx/%08lx; "
              "disabled, using CPU renderer\n",
              stage, result == WaitTimeout ? "timeout" : "controller error",
              static_cast<unsigned long>(V3D_read(V3D_CLE_CT0CS)),
              static_cast<unsigned long>(V3D_read(V3D_CLE_CT1CS)),
              static_cast<unsigned long>(V3D_read(V3dCleCt0Ca)),
+             static_cast<unsigned long>(V3D_read(V3dCleCt0Ea)),
+             static_cast<unsigned long>(V3D_read(V3dCleCt0Lc)),
              static_cast<unsigned long>(V3D_read(V3D_CLE_CT1CA)),
+             static_cast<unsigned long>(V3D_read(V3dCleCt1Ea)),
+             static_cast<unsigned long>(V3D_read(V3D_CLE_CT1LC)),
              static_cast<unsigned long>(V3D_read(V3dClePcs)),
-             static_cast<unsigned long>(V3D_read(V3dErrStat)),
-             v3d_get_binning_flush_count(), v3d_get_render_frame_count());
+             static_cast<unsigned long>(V3D_read(V3dErrorStatus)),
+             v3d_get_binning_flush_count(), v3d_get_render_frame_count(),
+             static_cast<unsigned long>(V3D_read(V3D_CLE_CT0QBA)),
+             static_cast<unsigned long>(V3D_read(V3D_CLE_CT0QEA)),
+             static_cast<unsigned long>(V3D_read(V3D_CLE_CT1QBA)),
+             static_cast<unsigned long>(V3D_read(V3D_CLE_CT1QEA)),
+             static_cast<unsigned long>(V3D_read(V3D_CLE_CT0QTS)),
+             static_cast<unsigned long>(V3D_read(V3dHubInterruptStatus)),
+             static_cast<unsigned long>(V3D_read(V3dCoreInterruptStatus)),
+             static_cast<unsigned long>(V3D_read(V3dMmucControl)),
+             static_cast<unsigned long>(V3D_read(V3dMmuControl)),
+             static_cast<unsigned long>(V3D_read(V3dMmuViolationId)),
+             static_cast<unsigned long>(V3D_read(V3dMmuViolationAddress)),
+             static_cast<unsigned long>(V3D_read(V3dGmpStatus)),
+             static_cast<unsigned long>(V3D_read(V3dGmpConfig)));
     tic80SerialDebug(message);
 }
 
@@ -819,6 +930,13 @@ bool tic80_baremetal_v3d_initialize(uint32_t* framebuffer, unsigned framebufferP
         tic80SerialDebug(message);
         return false;
     }
+    logAddressState("initial address state");
+    if (!configureDirectAddressing())
+    {
+        logAddressState("failed to enter direct-addressing mode");
+        tic80SerialDebug("[tic80] V3D CRT: address setup failed; using CPU renderer\n");
+        return false;
+    }
 
     prepareMask();
     unsigned attributeCount = 0;
@@ -830,15 +948,20 @@ bool tic80_baremetal_v3d_initialize(uint32_t* framebuffer, unsigned framebufferP
     }
 
     CleanAndInvalidateDataCacheRange(reinterpret_cast<u32>(aligned), Gpu.arena.used);
-    stopControlThreads();
+    if (!resetControlThreads())
+    {
+        tic80SerialDebug("[tic80] V3D CRT: control-thread reset failed; using CPU renderer\n");
+        return false;
+    }
     v3d_invalidate_caches();
     Gpu.ready = true;
     char message[192];
     snprintf(message, sizeof message,
-             "[tic80] V3D CRT: ready (V3D 4.2, fb=%08lx pitch=%u, "
+             "[tic80] V3D CRT: ready (V3D 4.2 direct, fb=%08lx arena=%08lx pitch=%u, "
              "bcl=%u rcl=%u bytes)\n",
              static_cast<unsigned long>(reinterpret_cast<uintptr_t>(framebuffer)),
-             framebufferPitch, static_cast<unsigned>(Gpu.binning.used),
+             static_cast<unsigned long>(reinterpret_cast<uintptr_t>(aligned)), framebufferPitch,
+             static_cast<unsigned>(Gpu.binning.used),
              static_cast<unsigned>(Gpu.rendering.used));
     tic80SerialDebug(message);
     return true;
@@ -859,11 +982,12 @@ bool tic80_baremetal_v3d_render(const uint32_t* source)
                                V3D_ARM_TO_BUS_ADDR(V3D_BUFFER_WRITE_HEAD(Gpu.binning)),
                                V3D_ARM_TO_BUS_ADDR(Gpu.tileAllocation), TileAllocationSize,
                                V3D_ARM_TO_BUS_ADDR(Gpu.tileState));
+    clearControlThreadHalt(V3D_CLE_CT0CS);
     const WaitResult binningResult = waitForCount(false, binningCount);
     if (binningResult != WaitComplete)
     {
         logCommandFailure("binning", binningResult);
-        stopControlThreads();
+        resetControlThreads();
         Gpu.ready = false;
         return false;
     }
@@ -872,11 +996,12 @@ bool tic80_baremetal_v3d_render(const uint32_t* source)
     const uint8_t renderCount = v3d_get_render_frame_count();
     v3d_start_render_commands(V3D_ARM_TO_BUS_ADDR(Gpu.rendering.start),
                               V3D_ARM_TO_BUS_ADDR(V3D_BUFFER_WRITE_HEAD(Gpu.rendering)));
+    clearControlThreadHalt(V3D_CLE_CT1CS);
     const WaitResult renderResult = waitForCount(true, renderCount);
     if (renderResult != WaitComplete)
     {
         logCommandFailure("render", renderResult);
-        stopControlThreads();
+        resetControlThreads();
         Gpu.ready = false;
         return false;
     }
