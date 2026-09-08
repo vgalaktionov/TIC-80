@@ -5,3 +5,8 @@
 -#define KERNEL_MAX_SIZE		(2 * MEGABYTE)
 +#define KERNEL_MAX_SIZE		(16 * MEGABYTE)
  #endif
+@@ -273,3 +273,3 @@
+ #ifndef MAX_TASKS
+-#define MAX_TASKS		20
++#define MAX_TASKS		64
+ #endif

@@ -308,6 +308,7 @@ enum
     OptionsMenu_FullscreenOption,
     OptionsMenu_IntegerScaleOption,
     OptionsMenu_VolumeOption,
+    OptionsMenu_AutoSaveOption,
 #if defined(BUILD_EDITORS)
     OptionsMenu_Editor,
 #endif

@@ -115,10 +115,12 @@ u64 tic_sys_freq_get()
 
 void tic_sys_fullscreen_set(bool value)
 {
+    (void)value;
 }
 
 bool tic_sys_fullscreen_get()
 {
+    return true;
 }
 
 void tic_sys_message(const char* title, const char* message)
@@ -527,6 +529,8 @@ static void updateNetworkStatus()
         serialDebug((const char*)message);
         message.Format("[tic80] debug log: http://%s:8080/\n", (const char*)address);
         serialDebug((const char*)message);
+        serialDebug("[tic80] scheduler tasks:\n");
+        mScheduler.ListTasks(&mDebugLogDevice);
         reported = true;
     }
 }
