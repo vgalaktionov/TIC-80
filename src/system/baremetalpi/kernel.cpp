@@ -442,6 +442,7 @@ static void updateUSBInputDevices()
             pKeyboard->RegisterRemovedHandler(keyboardRemovedHandler);
             pKeyboard->RegisterKeyStatusHandlerRaw(KeyStatusHandlerRaw);
             serialDebug("[tic80] keyboard: attached\n");
+            tic80HdmiRecoveryInputAttached();
         }
     }
 
@@ -453,6 +454,7 @@ static void updateUSBInputDevices()
             pMouse->RegisterRemovedHandler(mouseRemovedHandler);
             pMouse->RegisterStatusHandler(mouseStatusHandler);
             serialDebug("[tic80] mouse: attached\n");
+            tic80HdmiRecoveryInputAttached();
         }
     }
 
@@ -649,7 +651,7 @@ TShutdownMode Run(void)
         if (tic80HdmiRecoveryPoll())
         {
             serialDebug(mScreen.RefreshDisplay()
-                            ? "[tic80] HDMI recovery: framebuffer scanout restored\n"
+                            ? "[tic80] HDMI recovery: framebuffer offset request accepted\n"
                             : "[tic80] HDMI recovery: framebuffer scanout restore failed\n");
         }
         if (tic80HdmiRecoveryCanWaitForVsync())
@@ -658,6 +660,10 @@ TShutdownMode Run(void)
 #ifdef SERIAL_DEBUG
             if (firstFrame) serialDebug("[tic80] first vsync: ok\n");
 #endif
+        }
+        else
+        {
+            CScheduler::Get()->MsSleep(1000 / TIC80_FRAMERATE);
         }
 
         screenCopy(&mScreen, product->screen, studio_config(platform.studio)->options.crt);

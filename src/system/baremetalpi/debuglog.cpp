@@ -2,6 +2,7 @@
 
 #include "debuglog.h"
 #include "logring.h"
+#include "hdmi_recovery.h"
 
 #include <circle/net/in.h>
 #include <circle/net/ipaddress.h>
@@ -129,6 +130,27 @@ private:
             static const char BadRequest[] =
                 "HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
             sendAll(socket, BadRequest, sizeof BadRequest - 1);
+            return;
+        }
+        // Queue work for the render task: never call TV service from HTTP.
+        // Require a custom header so browser cross-origin forms cannot reset video.
+        char* headerEnd = strstr(request, "\r\n\r\n");
+        headerEnd[2] = '\0'; // Do not accept a spoofed header in a request body.
+        static const char ResetPath[] = "POST /hdmi/reset HTTP/1.1\r\n";
+        static const char StatusPath[] = "POST /hdmi/status HTTP/1.1\r\n";
+        const bool reset = !strncmp(request, ResetPath, sizeof ResetPath - 1);
+        const bool status = !strncmp(request, StatusPath, sizeof StatusPath - 1);
+        if (reset || status)
+        {
+            if (!strstr(request, "\r\nX-TIC80-Debug: 1\r\n"))
+            {
+                static const char Forbidden[] = "HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+                sendAll(socket, Forbidden, sizeof Forbidden - 1);
+                return;
+            }
+            tic80HdmiRecoveryRequest(reset);
+            static const char Accepted[] = "HTTP/1.1 202 Accepted\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+            sendAll(socket, Accepted, sizeof Accepted - 1);
             return;
         }
         const boolean validPath = !strncmp(request, "GET / HTTP/", 11)

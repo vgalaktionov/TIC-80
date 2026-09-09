@@ -8,8 +8,10 @@
 
 #include "video.h"
 
+#ifndef TIC80_V3D_RENDERER_TEST
 #include <circle/synchronize.h>
 #include <circle/timer.h>
+#endif
 #include <cstdio>
 #include <cstring>
 #include <cstdlib>
@@ -40,10 +42,9 @@ static const unsigned MaskUifSize = OutputWidth * MaskUifPaddedHeight * sizeof(u
 static const unsigned TileAllocationSize = 1024 * 1024;
 static const unsigned TileStateSize = TilesX * TilesY * 256;
 static const unsigned BlurredSize = TIC80_WIDTH * TIC80_HEIGHT * sizeof(uint32_t);
-static const unsigned ZBufferSize = OutputWidth * OutputHeight * 2;
+static const unsigned OutputSize = OutputWidth * OutputHeight * sizeof(uint32_t);
 static const unsigned ArenaSize = BlurredSize + SourceUifSize + MaskUifSize + TileAllocationSize
-                                  + TileStateSize + OutputWidth * OutputHeight * 2
-                                  + 64 * 1024;
+                                  + TileStateSize + OutputSize + 64 + 64 * 1024;
 static const unsigned CommandTimeoutUs = 250000;
 static const unsigned PowerTimeoutUs = 100000;
 static const unsigned V3dCleCt0Ea = V3D_CORE0 + 0x108;
@@ -52,8 +53,6 @@ static const unsigned V3dCleCt0Ca = V3D_CORE0 + 0x110;
 static const unsigned V3dCleCt0Lc = V3D_CORE0 + 0x120;
 static const unsigned V3dClePcs = V3D_CORE0 + 0x130;
 static const unsigned V3dErrorStatus = V3D_CORE0 + 0xf20;
-static const uint32_t V3dCleControlThreadRun = 1u << 5;
-static const uint32_t V3dCleControlThreadSubMode = 1u << 4;
 static const unsigned V3dHubInterruptStatus = V3D_HUB_BASE + 0x50;
 static const unsigned V3dHubInterruptClear = V3D_HUB_BASE + 0x58;
 static const unsigned V3dMmucControl = V3D_HUB_BASE + 0x1000;
@@ -101,6 +100,9 @@ struct AtlasInstance
 struct Renderer
 {
     bool ready;
+    bool outputValidated;
+    uint32_t* scanout;
+    unsigned scanoutPitch;
     uint32_t* framebuffer;
     unsigned framebufferPitch;
     uint8_t* arenaAllocation;
@@ -112,7 +114,6 @@ struct Renderer
     uint8_t* maskUif;
     uint8_t* tileAllocation;
     uint8_t* tileState;
-    uint8_t* zBuffer;
     v3d_static_buffer binning;
     v3d_static_buffer rendering;
     v3d_static_buffer indirect;
@@ -188,9 +189,9 @@ static void* allocate(v3d_static_buffer* buffer, unsigned size, unsigned alignme
 
 static bool buffersValid()
 {
-    return Gpu.blurred && Gpu.vertices && Gpu.instance && Gpu.sourceUif
+    return Gpu.framebuffer && Gpu.blurred && Gpu.vertices && Gpu.instance && Gpu.sourceUif
            && Gpu.maskUif && Gpu.tileAllocation
-           && Gpu.tileState && Gpu.zBuffer && Gpu.binning.start && Gpu.rendering.start
+           && Gpu.tileState && Gpu.binning.start && Gpu.rendering.start
            && Gpu.indirect.start && Gpu.state.start;
 }
 
@@ -393,8 +394,9 @@ static bool prepareBinning(v3d_gl_shader_state_record* shader, unsigned attribut
     config->enable_reverse_facing_primitive = true;
     config->clockwise_primitives = true;
     config->line_rasterization = V3D_LINE_RASTERIZATION_DIAMOND_EXIT;
-    config->depth_test_function = V3D_COMPARE_FUNC_LESS;
-    config->early_z_updates_enable = true;
+    // Fullscreen post-processing has no depth attachment or depth writes.
+    config->depth_test_function = V3D_COMPARE_FUNC_ALWAYS;
+    config->early_z_updates_enable = false;
 
     V3D_BUFFER_ALLOC_OPERATION(&Gpu.binning, v3d_OP_POINT_SIZE, v3d_point_size, point);
     V3D_BUFFER_ALLOC_OPERATION(&Gpu.binning, v3d_OP_LINE_WIDTH, v3d_line_width, line);
@@ -491,6 +493,7 @@ static bool prepareRendering()
     common->maximum_bpp_of_all_render_targets = V3D_INTERNAL_BPP_32;
     common->early_z_test_and_update_direction = v3d_EARLY_Z_DIRECTION_LT_LE;
     common->internal_depth_type = V3D_INTERNAL_TYPE_DEPTH16;
+    common->early_z_disable = true;
 
     V3D_BUFFER_ALLOC_OPERATION(&Gpu.rendering, v3d_OP_TILE_RENDERING_MODE_CFG_CLEAR_COLORS_PART1,
                                v3d_tile_rendering_mode_cfg_clear_colors_part1, clearColor);
@@ -600,17 +603,6 @@ static bool prepareRendering()
     targetStore->height_in_ub_or_stride = Gpu.framebufferPitch * sizeof(uint32_t);
     targetStore->address = V3D_ARM_TO_BUS_ADDR(Gpu.framebuffer);
 
-    V3D_BUFFER_ALLOC_OPERATION(&Gpu.indirect, v3d_OP_STORE_TILE_BUFFER_GENERAL,
-                               v3d_store_tile_buffer_general, zStore);
-    if (!zStore) return false;
-    zStore->buffer_to_store = v3d_Z;
-    zStore->memory_format = V3D_MEMORY_FORMAT_UIF_XOR;
-    zStore->dither_mode = V3D_DITHER_MODE_NONE;
-    zStore->decimate_mode = V3D_DECIMATE_MODE_SAMPLE_0;
-    zStore->output_image_format = V3D_OUTPUT_IMAGE_FORMAT_D16;
-    zStore->height_in_ub_or_stride = (OutputHeight + 15) / 8;
-    zStore->address = V3D_ARM_TO_BUS_ADDR(Gpu.zBuffer);
-
     V3D_BUFFER_ALLOC_OPERATION(&Gpu.indirect, v3d_OP_CLEAR_TILE_BUFFERS,
                                v3d_clear_tile_buffers, tileClear);
     if (!tileClear) return false;
@@ -712,20 +704,7 @@ static bool elapsed(unsigned start, unsigned timeout)
     return static_cast<unsigned>(CTimer::GetClockTicks() - start) >= timeout;
 }
 
-static bool powerOn()
-{
-    V3D_write(PM_GRAFX, (V3D_read(PM_GRAFX) | PM_V3DRSTN) | PM_PASSWORD);
-    V3D_write(ASB_V3D_M_CTRL, (V3D_read(ASB_V3D_M_CTRL) & ~ASB_REQ_STOP) | PM_PASSWORD);
-    unsigned start = CTimer::GetClockTicks();
-    while (V3D_read(ASB_V3D_M_CTRL) & ASB_ACK)
-        if (elapsed(start, PowerTimeoutUs)) return false;
-
-    V3D_write(ASB_V3D_S_CTRL, (V3D_read(ASB_V3D_S_CTRL) & ~ASB_REQ_STOP) | PM_PASSWORD);
-    start = CTimer::GetClockTicks();
-    while (V3D_read(ASB_V3D_S_CTRL) & ASB_ACK)
-        if (elapsed(start, PowerTimeoutUs)) return false;
-    return true;
-}
+#include "v3d_power.h"
 
 static bool configureDirectAddressing()
 {
@@ -773,30 +752,6 @@ static void logAddressState(const char* label)
     tic80SerialDebug(message);
 }
 
-static void clearControlThreadHalt(unsigned controlRegister)
-{
-    const uint32_t status = V3D_read(controlRegister);
-    if ((status & (V3dCleControlThreadRun | V3dCleControlThreadSubMode))
-        == V3dCleControlThreadSubMode)
-    {
-        V3D_write(controlRegister, V3dCleControlThreadSubMode);
-        DataSyncBarrier();
-    }
-}
-
-static bool resetControlThreads()
-{
-    V3D_write(V3D_CLE_CT0CS, V3D_CLE_CTNCS_CTRSTA);
-    V3D_write(V3D_CLE_CT1CS, V3D_CLE_CTNCS_CTRSTA);
-    DataSyncBarrier();
-
-    // CTSUBS is the normal stopped-at-halt state. Leave it asserted until a
-    // fresh CA/EA pair has been queued, then clear it to start that list.
-    const uint32_t invalid = V3dCleControlThreadRun | V3D_CLE_CTNCS_CTERR;
-    return !(V3D_read(V3D_CLE_CT0CS) & invalid)
-           && !(V3D_read(V3D_CLE_CT1CS) & invalid);
-}
-
 static void logControlThreadState(const char* label)
 {
     char message[256];
@@ -823,7 +778,6 @@ static WaitResult waitForCount(bool rendering, uint8_t previous)
         if (current != previous) return WaitComplete;
         const uint32_t status = V3D_read(rendering ? V3D_CLE_CT1CS : V3D_CLE_CT0CS);
         if (status & V3D_CLE_CTNCS_CTERR) return WaitControllerError;
-        clearControlThreadHalt(rendering ? V3D_CLE_CT1CS : V3D_CLE_CT0CS);
     } while (!elapsed(start, CommandTimeoutUs));
     return WaitTimeout;
 }
@@ -876,6 +830,69 @@ static uint8_t* allocateBytes(unsigned size, unsigned alignment)
 {
     return static_cast<uint8_t*>(allocate(&Gpu.arena, size, alignment));
 }
+
+static uint32_t probeColor(unsigned x, unsigned y)
+{
+    static const uint32_t colors[] = {
+        0xffe04020, 0xff2080e0, 0xff40d060, 0xffd0b040,
+    };
+    return colors[(y >= TIC80_HEIGHT / 2) * 2 + (x >= TIC80_WIDTH / 2)];
+}
+
+static bool probePixelsValid(const uint32_t* output, unsigned pitch)
+{
+    // Sample all four quadrants, scanline phases, and RGB mask phases.
+    for (unsigned quadrant = 0; quadrant < 4; ++quadrant)
+        for (unsigned row = 0; row < 4; ++row)
+            for (unsigned col = 0; col < 3; ++col)
+            {
+                const unsigned x = (quadrant % 2) * OutputWidth / 2 + 120 + col;
+                const unsigned y = (quadrant / 2) * OutputHeight / 2 + 68 + row;
+                const uint32_t color = probeColor(x / 4, y / 4);
+                const uint32_t pixel = output[y * pitch + x];
+                for (unsigned channel = 0; channel < 3; ++channel)
+                {
+                    const unsigned shift = channel * 8;
+                    const unsigned maskChannel = 2 - channel; // BGRA output
+                    const unsigned mask = scanline(x % 3 == maskChannel ? 255 : dim27(255), y % 4);
+                    const int expected = (((color >> shift) & 255) * mask + 127) / 255;
+                    const int actual = (pixel >> shift) & 255;
+                    if (abs(expected - actual) > 3)
+                    {
+                        char message[192];
+                        snprintf(message, sizeof message,
+                                 "[tic80] V3D CRT: pixel test failed x=%u y=%u pixel=%08lx channel=%u expected=%d actual=%d\n",
+                                 x, y, static_cast<unsigned long>(pixel), channel, expected, actual);
+                        tic80SerialDebug(message);
+                        return false;
+                    }
+                }
+            }
+    return true;
+}
+
+static bool validateOutput()
+{
+    uint32_t* source = static_cast<uint32_t*>(malloc(TIC80_FULLWIDTH * TIC80_FULLHEIGHT * sizeof(uint32_t)));
+    if (!source) return false;
+    uint32_t* output = Gpu.framebuffer;
+    memset(output, 0x5a, OutputSize + 64);
+    memset(source, 0, TIC80_FULLWIDTH * TIC80_FULLHEIGHT * sizeof(uint32_t));
+    for (unsigned y = 0; y < TIC80_HEIGHT; ++y)
+        for (unsigned x = 0; x < TIC80_WIDTH; ++x)
+            source[(y + TIC80_MARGIN_TOP) * TIC80_FULLWIDTH + x + TIC80_MARGIN_LEFT] = probeColor(x, y);
+
+    CleanAndInvalidateDataCacheRange(reinterpret_cast<uintptr_t>(output), OutputSize + 64);
+    bool valid = tic80_baremetal_v3d_render(source);
+    // No CPU writes touch this cache-line-aligned region during GPU execution.
+    CleanAndInvalidateDataCacheRange(reinterpret_cast<uintptr_t>(output), OutputSize + 64);
+    if (valid) valid = probePixelsValid(output, OutputWidth);
+    for (unsigned i = 0; i < 16; ++i)
+        if (output[OutputWidth * OutputHeight + i] != 0x5a5a5a5a) valid = false;
+
+    free(source);
+    return valid;
+}
 }
 
 bool tic80_baremetal_v3d_initialize(uint32_t* framebuffer, unsigned framebufferPitch)
@@ -890,8 +907,9 @@ bool tic80_baremetal_v3d_initialize(uint32_t* framebuffer, unsigned framebufferP
         return false;
     }
 
-    Gpu.framebuffer = framebuffer;
-    Gpu.framebufferPitch = framebufferPitch;
+    Gpu.scanout = framebuffer;
+    Gpu.scanoutPitch = framebufferPitch;
+    Gpu.framebufferPitch = OutputWidth;
     Gpu.arenaAllocation = static_cast<uint8_t*>(malloc(ArenaSize + 4095));
     if (!Gpu.arenaAllocation)
     {
@@ -911,7 +929,7 @@ bool tic80_baremetal_v3d_initialize(uint32_t* framebuffer, unsigned framebufferP
     Gpu.maskUif = allocateBytes(MaskUifSize, 4096);
     Gpu.tileAllocation = allocateBytes(TileAllocationSize, 4096);
     Gpu.tileState = allocateBytes(TileStateSize, 4096);
-    Gpu.zBuffer = allocateBytes(ZBufferSize, 4096);
+    Gpu.framebuffer = reinterpret_cast<uint32_t*>(allocateBytes(OutputSize + 64, 64));
     Gpu.binning = {allocateBytes(4096, 64), 0, 4096};
     Gpu.rendering = {allocateBytes(4096, 64), 0, 4096};
     Gpu.indirect = {allocateBytes(4096, 64), 0, 4096};
@@ -943,6 +961,12 @@ bool tic80_baremetal_v3d_initialize(uint32_t* framebuffer, unsigned framebufferP
         return false;
     }
     logAddressState("initial address state");
+    if (!resetGpu())
+    {
+        tic80SerialDebug("[tic80] V3D CRT: GPU reset timed out; using CPU renderer\n");
+        return false;
+    }
+    logControlThreadState("after full GPU reset");
     if (!configureDirectAddressing())
     {
         logAddressState("failed to enter direct-addressing mode");
@@ -959,24 +983,27 @@ bool tic80_baremetal_v3d_initialize(uint32_t* framebuffer, unsigned framebufferP
         return false;
     }
 
-    CleanAndInvalidateDataCacheRange(reinterpret_cast<u32>(aligned), Gpu.arena.used);
-    if (!resetControlThreads())
-    {
-        logControlThreadState("control-thread reset failed");
-        tic80SerialDebug("[tic80] V3D CRT: control-thread reset failed; using CPU renderer\n");
-        return false;
-    }
+    CleanAndInvalidateDataCacheRange(reinterpret_cast<uintptr_t>(aligned), Gpu.arena.used);
     v3d_invalidate_caches();
     Gpu.ready = true;
     char message[192];
     snprintf(message, sizeof message,
-             "[tic80] V3D CRT: ready (V3D 4.2 direct, fb=%08lx arena=%08lx pitch=%u, "
+             "[tic80] V3D CRT: prepared, execution unverified (V3D 4.2 direct, fb=%08lx arena=%08lx pitch=%u, "
              "bcl=%u rcl=%u bytes)\n",
              static_cast<unsigned long>(reinterpret_cast<uintptr_t>(framebuffer)),
              static_cast<unsigned long>(reinterpret_cast<uintptr_t>(aligned)), framebufferPitch,
              static_cast<unsigned>(Gpu.binning.used),
              static_cast<unsigned>(Gpu.rendering.used));
     tic80SerialDebug(message);
+    if (!validateOutput())
+    {
+        resetGpu();
+        Gpu.ready = false;
+        tic80SerialDebug("[tic80] V3D CRT: output validation failed; using CPU renderer\n");
+        return false;
+    }
+    tic80SerialDebug("[tic80] V3D CRT: off-screen pixel test passed\n");
+    Gpu.outputValidated = true;
     return true;
 }
 
@@ -984,8 +1011,8 @@ bool tic80_baremetal_v3d_render(const uint32_t* source)
 {
     if (!Gpu.ready || !source) return false;
     prepareSource(source);
-    CleanAndInvalidateDataCacheRange(reinterpret_cast<u32>(Gpu.sourceUif), SourceUifSize);
-    CleanAndInvalidateDataCacheRange(reinterpret_cast<u32>(Gpu.framebuffer),
+    CleanAndInvalidateDataCacheRange(reinterpret_cast<uintptr_t>(Gpu.sourceUif), SourceUifSize);
+    CleanAndInvalidateDataCacheRange(reinterpret_cast<uintptr_t>(Gpu.framebuffer),
                                      Gpu.framebufferPitch * OutputHeight * sizeof(uint32_t));
     DataSyncBarrier();
     v3d_invalidate_caches();
@@ -995,12 +1022,12 @@ bool tic80_baremetal_v3d_render(const uint32_t* source)
                                V3D_ARM_TO_BUS_ADDR(V3D_BUFFER_WRITE_HEAD(Gpu.binning)),
                                V3D_ARM_TO_BUS_ADDR(Gpu.tileAllocation), TileAllocationSize,
                                V3D_ARM_TO_BUS_ADDR(Gpu.tileState));
-    clearControlThreadHalt(V3D_CLE_CT0CS);
+    DataSyncBarrier();
     const WaitResult binningResult = waitForCount(false, binningCount);
     if (binningResult != WaitComplete)
     {
         logCommandFailure("binning", binningResult);
-        resetControlThreads();
+        resetGpu();
         Gpu.ready = false;
         return false;
     }
@@ -1009,16 +1036,29 @@ bool tic80_baremetal_v3d_render(const uint32_t* source)
     const uint8_t renderCount = v3d_get_render_frame_count();
     v3d_start_render_commands(V3D_ARM_TO_BUS_ADDR(Gpu.rendering.start),
                               V3D_ARM_TO_BUS_ADDR(V3D_BUFFER_WRITE_HEAD(Gpu.rendering)));
-    clearControlThreadHalt(V3D_CLE_CT1CS);
+    DataSyncBarrier();
     const WaitResult renderResult = waitForCount(true, renderCount);
     if (renderResult != WaitComplete)
     {
         logCommandFailure("render", renderResult);
-        resetControlThreads();
+        resetGpu();
         Gpu.ready = false;
         return false;
     }
 
     DataSyncBarrier();
+    static bool firstFrame = true;
+    if (firstFrame)
+    {
+        tic80SerialDebug("[tic80] V3D CRT: first command pair completed (pixels not yet validated)\n");
+        firstFrame = false;
+    }
+    if (Gpu.outputValidated)
+    {
+        CleanAndInvalidateDataCacheRange(reinterpret_cast<uintptr_t>(Gpu.framebuffer), OutputSize);
+        for (unsigned row = 0; row < OutputHeight; ++row)
+            memcpy(Gpu.scanout + row * Gpu.scanoutPitch,
+                   Gpu.framebuffer + row * OutputWidth, OutputWidth * sizeof(uint32_t));
+    }
     return true;
 }
