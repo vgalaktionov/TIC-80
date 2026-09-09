@@ -1,0 +1,21 @@
+IMG_NAME='tic80-appliance'
+PI_GEN_RELEASE='TIC-80 appliance prototype'
+RELEASE='trixie'
+DEPLOY_COMPRESSION='xz'
+COMPRESSION_LEVEL=3
+TARGET_HOSTNAME='tic80'
+FIRST_USER_NAME='tic80'
+# Only used while constructing the image. The custom stage locks this account.
+FIRST_USER_PASS='build-only-account-locked-before-export'
+DISABLE_FIRST_BOOT_USER_RENAME=1
+PASSWORDLESS_SUDO=0
+ENABLE_SSH=1
+PUBKEY_ONLY_SSH=1
+PUBKEY_SSH_FIRST_USER=$(cat /ssh-key.pub)
+ENABLE_CLOUD_INIT=0
+LOCALE_DEFAULT='en_US.UTF-8'
+KEYBOARD_KEYMAP='us'
+KEYBOARD_LAYOUT='English (US)'
+TIMEZONE_DEFAULT='Europe/Amsterdam'
+WPA_COUNTRY='NL'
+STAGE_LIST='stage0 stage1 stage2 /appliance/stage-tic80'

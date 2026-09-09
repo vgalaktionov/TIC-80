@@ -194,3 +194,6 @@ build/*.map
 # 3ds files
 *.3dsx
 *.smdh
+
+# Linux appliance build output (images, logs and screenshots).
+/build/linux-appliance/

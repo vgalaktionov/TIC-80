@@ -1,0 +1,19 @@
+#!/bin/bash
+set -eu
+xset s off
+xset -dpms
+xset s noblank
+openbox --config-file /usr/local/lib/tic80/openbox.xml &
+# Wait for EWMH support before SDL requests fullscreen.
+for attempt in $(seq 1 50); do
+    if xprop -root _NET_SUPPORTING_WM_CHECK | grep -q 'window id'; then break; fi
+    sleep 0.1
+done
+systemctl --user start pipewire.service pipewire-pulse.service wireplumber.service
+for attempt in $(seq 1 30); do
+    if pactl info >/dev/null 2>&1; then break; fi
+    sleep 0.1
+done
+glxinfo -B
+# Do not force --crt each launch: F6/options and the saved preference remain useful.
+exec stdbuf -oL -eL /usr/local/bin/tic80 --fullscreen --skip --fs=/home/tic80/cartridges

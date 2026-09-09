@@ -1,0 +1,14 @@
+#!/bin/bash
+set -u
+export SDL_VIDEODRIVER=x11
+export SDL_AUDIODRIVER=pulseaudio
+while true; do
+    startx /usr/local/lib/tic80/session -- :0 vt1 -keeptty -nolisten tcp \
+        2>&1 | systemd-cat -t tic80-session
+    result=${PIPESTATUS[0]}
+    if [ "$result" = 0 ]; then
+        sudo -n /usr/bin/systemctl poweroff
+        sleep 30
+    fi
+    sleep 3
+done

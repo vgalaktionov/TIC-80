@@ -1,0 +1,7 @@
+build-essential cmake pkg-config ruby rake
+libsdl2-dev libcurl4-openssl-dev libgl1-mesa-dev libglu1-mesa-dev
+xserver-xorg-core xserver-xorg-input-libinput xinit x11-xserver-utils x11-utils xauth openbox
+mesa-utils libgl1-mesa-dri
+pipewire pipewire-pulse wireplumber pulseaudio-utils dbus-user-session
+python3 avahi-daemon network-manager rfkill
+xvfb xdotool x11-apps python3-pil

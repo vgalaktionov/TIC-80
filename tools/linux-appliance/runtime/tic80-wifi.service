@@ -1,0 +1,11 @@
+[Unit]
+Description=Import TIC-80 Wi-Fi profile from boot partition
+After=local-fs.target
+Before=NetworkManager.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/lib/tic80/import-wifi
+
+[Install]
+WantedBy=multi-user.target
