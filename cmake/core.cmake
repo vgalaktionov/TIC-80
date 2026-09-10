@@ -38,6 +38,13 @@ endif()
 
 add_library(tic80core STATIC ${TIC80CORE_SRC})
 
+if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
+    # miniaudio's iOS backend uses AVAudioSession's Objective-C API.
+    enable_language(OBJC)
+    set_source_files_properties(${TIC80CORE_DIR}/ext/fft.c PROPERTIES LANGUAGE OBJC)
+    target_link_libraries(tic80core PRIVATE "-framework AVFoundation" "-framework AudioToolbox" "-framework Foundation")
+endif()
+
 if (FREEBSD)
     target_include_directories(tic80core PRIVATE ${SYSROOT_PATH}/usr/local/include)
     target_link_directories(tic80core PRIVATE ${SYSROOT_PATH}/usr/local/lib)

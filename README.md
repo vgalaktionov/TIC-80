@@ -380,6 +380,32 @@ sudo ln -s /usr/local/lib/dri/swrast_dri.so /usr/local/lib/dri-devel/
 TIC-80 can now be run with `tic80` (if installed) or `./tic80` (with no installation).
 
 ## iOS / tvOS
+To compile the libretro core for iOS, use macOS with full Xcode selected through
+`xcode-select`, CMake 3.18 or newer, Ruby/rake, and initialized submodules:
+
+```sh
+git submodule update --init --recursive
+bash tools/libretro/build-ios.sh
+```
+
+This builds all scripting runtimes into `build/libretro-iphoneos-arm64-OFF/bin/tic80_libretro.dylib`
+and verifies linking and exported entry points. The default minimum iOS version is
+13.0; override it with `IOS_DEPLOYMENT_TARGET`. For a simulator or a static core:
+
+```sh
+SDK=iphonesimulator ARCH=arm64 bash tools/libretro/build-ios.sh
+LIBRETRO_STATIC=ON bash tools/libretro/build-ios.sh
+```
+
+Use `ARCH=x86_64` for an Intel simulator. Static output is
+`build/libretro-iphoneos-arm64-ON/lib/tic80_libretro.a`; it includes the enabled
+runtimes and bundled dependencies. Link it with the C++ standard library and
+the AVFoundation, AudioToolbox, and Foundation frameworks. Device and simulator
+libraries must be built separately. The frontend app handles embedding and code
+signing. To build only the default Lua runtime, append `-DBUILD_WITH_ALL=OFF`
+using a fresh `BUILD_DIR` (runtime options are cached by CMake).
+
+For the older standalone app ports:
 You can find iOS/tvOS version here
 - 0.60.3: https://github.com/brunophilipe/TIC-80
 - 0.45.0: https://github.com/CliffsDover/TIC-80

@@ -74,7 +74,29 @@ if(BUILD_WITH_RUBY)
         set(MRUBY_TOOLCHAIN gcc)
     endif()
 
-    if(APPLE)
+    set(MRUBY_TARGET_FLAGS "")
+    if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
+        execute_process(COMMAND xcrun --sdk "${CMAKE_OSX_SYSROOT}" --show-sdk-path
+            OUTPUT_VARIABLE MRUBY_SYSROOT OUTPUT_STRIP_TRAILING_WHITESPACE
+            RESULT_VARIABLE MRUBY_SDK_RESULT)
+        if(NOT MRUBY_SDK_RESULT EQUAL 0)
+            message(FATAL_ERROR "Could not resolve the iOS SDK for mruby")
+        endif()
+        foreach(arch ${CMAKE_OSX_ARCHITECTURES})
+            string(APPEND MRUBY_TARGET_FLAGS " -arch ${arch}")
+        endforeach()
+        if(CMAKE_OSX_DEPLOYMENT_TARGET)
+            if(MRUBY_SYSROOT MATCHES "iPhoneSimulator")
+                string(APPEND MRUBY_TARGET_FLAGS " -mios-simulator-version-min=${CMAKE_OSX_DEPLOYMENT_TARGET}")
+            else()
+                string(APPEND MRUBY_TARGET_FLAGS " -miphoneos-version-min=${CMAKE_OSX_DEPLOYMENT_TARGET}")
+            endif()
+        endif()
+        # Device and simulator configurations must not reuse a host archive or
+        # overwrite each other's generated files in the source checkout.
+        set(MRUBY_LIB ${CMAKE_CURRENT_BINARY_DIR}/mruby/target/lib/libmruby.a)
+        list(APPEND MRUBY_RAKE_EXTRA_OPTS "MRUBY_BUILD_DIR=${CMAKE_CURRENT_BINARY_DIR}/mruby")
+    elseif(APPLE)
         execute_process(COMMAND xcrun --sdk macosx --show-sdk-path OUTPUT_VARIABLE MRUBY_SYSROOT OUTPUT_STRIP_TRAILING_WHITESPACE)
     endif()
 
@@ -92,8 +114,8 @@ if(BUILD_WITH_RUBY)
             ${RAKE} clean all "MRUBY_CONFIG=${MRUBY_CONFIG}"
                 "TARGET_CC=\"${CMAKE_C_COMPILER}\""
                 "TARGET_AR=\"${CMAKE_AR}\""
-                "TARGET_CFLAGS=${CMAKE_C_FLAGS} ${CMAKE_C_FLAGS_${BUILD_TYPE_UC}}"
-                "TARGET_LDFLAGS=${CMAKE_EXE_LINKER_FLAGS} ${CMAKE_LINKER_FLAGS_${BUILD_TYPE_UC}}"
+                "TARGET_CFLAGS=${CMAKE_C_FLAGS} ${CMAKE_C_FLAGS_${BUILD_TYPE_UC}} ${MRUBY_TARGET_FLAGS}"
+                "TARGET_LDFLAGS=${CMAKE_EXE_LINKER_FLAGS} ${CMAKE_LINKER_FLAGS_${BUILD_TYPE_UC}} ${MRUBY_TARGET_FLAGS}"
                 "BUILD_TYPE=${BUILD_TYPE_UC}"
                 "MRUBY_SYSROOT=${MRUBY_SYSROOT}"
                 "MRUBY_TOOLCHAIN=${MRUBY_TOOLCHAIN}"

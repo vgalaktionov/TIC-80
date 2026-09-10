@@ -8,7 +8,62 @@ if(BUILD_LIBRETRO)
         ${LIBRETRO_DIR}/tic80_libretro.c
     )
 
-    if (LIBRETRO_STATIC)
+    if(LIBRETRO_STATIC AND CMAKE_SYSTEM_NAME STREQUAL "iOS")
+        if(NOT BUILD_STATIC)
+            message(FATAL_ERROR "An iOS static libretro core requires BUILD_STATIC=ON")
+        endif()
+
+        add_library(tic80_libretro STATIC ${LIBRETRO_SRC})
+        target_link_libraries(tic80_libretro PRIVATE tic80core)
+
+        # Merge compiled archives, preserving each dependency's language,
+        # compile options and generated sources. Recompiling a flattened source
+        # list loses these properties (and misses runtime adapter targets).
+        set(ios_core_pending tic80core)
+        set(ios_core_visited "")
+        set(ios_core_archives "")
+        while(ios_core_pending)
+            list(GET ios_core_pending 0 dep)
+            list(REMOVE_AT ios_core_pending 0)
+            if(dep IN_LIST ios_core_visited)
+                continue()
+            endif()
+            list(APPEND ios_core_visited "${dep}")
+            if(TARGET "${dep}")
+                get_target_property(dep_type "${dep}" TYPE)
+                if(dep_type STREQUAL "STATIC_LIBRARY" OR dep_type STREQUAL "UNKNOWN_LIBRARY")
+                    list(APPEND ios_core_archives "$<TARGET_FILE:${dep}>")
+                elseif(dep_type STREQUAL "SHARED_LIBRARY")
+                    message(FATAL_ERROR "iOS static libretro dependency ${dep} must be static")
+                endif()
+                get_target_property(dep_links "${dep}" LINK_LIBRARIES)
+                if(dep_links)
+                    list(APPEND ios_core_pending ${dep_links})
+                endif()
+            elseif(IS_ABSOLUTE "${dep}" AND dep MATCHES "\\.a$")
+                list(APPEND ios_core_archives "${dep}")
+            endif()
+        endwhile()
+
+        # Static target link dependencies are only ordering edges. A generated
+        # empty translation unit makes archive changes trigger a new merge too.
+        set(ios_core_stamp "${CMAKE_CURRENT_BINARY_DIR}/libretro_ios_dependencies.c")
+        add_custom_command(OUTPUT "${ios_core_stamp}"
+            COMMAND ${CMAKE_COMMAND} -E touch "${ios_core_stamp}"
+            DEPENDS ${ios_core_archives}
+            VERBATIM
+        )
+        target_sources(tic80_libretro PRIVATE "${ios_core_stamp}")
+
+        find_program(TIC80_APPLE_LIBTOOL libtool REQUIRED)
+        add_custom_command(TARGET tic80_libretro POST_BUILD
+            COMMAND "${TIC80_APPLE_LIBTOOL}" -static -o "$<TARGET_FILE:tic80_libretro>.merged"
+                "$<TARGET_FILE:tic80_libretro>" ${ios_core_archives}
+            COMMAND ${CMAKE_COMMAND} -E rename "$<TARGET_FILE:tic80_libretro>.merged" "$<TARGET_FILE:tic80_libretro>"
+            VERBATIM
+        )
+        set_target_properties(tic80_libretro PROPERTIES SUFFIX "${LIBRETRO_SUFFIX}.a")
+    elseif (LIBRETRO_STATIC)
         # Collect sources from all dependencies to build a monolithic library.
         # This ensures that consoles and Emscripten get a single, complete archive.
         set(TIC80_MONOLITHIC_SRCS ${LIBRETRO_SRC})

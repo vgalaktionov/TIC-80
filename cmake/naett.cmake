@@ -42,6 +42,8 @@ if(USE_NAETT)
     elseif(LINUX)
         target_include_directories(naett PRIVATE ${CURL_INCLUDE_DIRS})
         target_link_libraries(naett ${CURL_LIBRARIES} pthread)
+    elseif(CMAKE_SYSTEM_NAME STREQUAL "iOS")
+        target_link_libraries(naett "-framework Foundation")
     elseif(APPLE)
         target_link_libraries(naett
             "-framework Cocoa")

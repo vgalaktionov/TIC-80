@@ -67,6 +67,12 @@ if(BUILD_WITH_LUA OR BUILD_WITH_MOON OR BUILD_WITH_YUE OR BUILD_WITH_FENNEL)
         ${LUA_DIR}/lbitlib.c
     )
 
+    # TIC-80 opens its sandboxed libraries explicitly in luaapi.c. The unused
+    # standard initializer and OS library pull in system(), unavailable on iOS.
+    if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
+        list(REMOVE_ITEM LUA_SRC ${LUA_DIR}/loslib.c ${LUA_DIR}/linit.c)
+    endif()
+
     add_library(luaapi STATIC
         ${LUA_SRC}
         ${CMAKE_SOURCE_DIR}/src/api/luaapi.c

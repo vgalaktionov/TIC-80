@@ -197,3 +197,4 @@ build/*.map
 
 # Linux appliance build output (images, logs and screenshots).
 /build/linux-appliance/
+/build/libretro-*/
