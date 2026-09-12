@@ -2,6 +2,10 @@
 set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 OUT="$ROOT/build/linux-appliance"
+umask 077
+WIFI_DIR=$(mktemp -d "${TMPDIR:-/tmp}/tic80-wifi.XXXXXX")
+trap 'rm -rf "$WIFI_DIR"' EXIT
+python3 "$ROOT/tools/linux-appliance/prepare-wifi.py" --output "$WIFI_DIR" "$@"
 SSH_PUBLIC_KEY_FILE=${SSH_PUBLIC_KEY_FILE:-$HOME/.ssh/id_ed25519.pub}
 if [ ! -f "$SSH_PUBLIC_KEY_FILE" ]; then
     echo 'Set SSH_PUBLIC_KEY_FILE to your SSH public key file.' >&2
@@ -35,5 +39,8 @@ docker run --rm --name tic80-appliance-build --privileged \
     -v "$ROOT:/source:ro" \
     -v "$ROOT/tools/linux-appliance:/appliance:ro" \
     -v "$SSH_PUBLIC_KEY_FILE:/ssh-key.pub:ro" \
+    -v "$WIFI_DIR:/wifi-secrets:ro" \
     -e GIT_HASH="$(git -C "$ROOT" rev-parse HEAD)" \
     tic80-appliance-builder ./build.sh -c /appliance/config 2>&1 | tee "$OUT/build.log"
+# Personalized images contain a network secret even though the source tree does not.
+chmod 600 "$OUT"/image_*.img.xz

@@ -16,6 +16,17 @@ space is required, plus sufficient free space inside Docker's VM. Allow substant
 download/build time. pi-gen is pinned in the Dockerfile; apt packages follow
 the distribution repositories, so this is not a bit-reproducible build.
 
+To preconfigure Wi-Fi, pass `--wifi-ssid 'your SSID' --wifi-password 'your password'`
+to the build script, or `--wifi-from-wpa /Volumes/BOOTFS/wpa_supplicant.conf`
+to import a single network from an existing card. These options are mutually
+exclusive. The importer supports plain quoted strings and hexadecimal SSIDs/PSKs;
+use explicit arguments for escaped wpa_supplicant values. Explicit arguments may
+appear in shell history and process listings. Credentials are not printed or
+written into the repository: a mode-600 temporary file is mounted read-only
+into the builder and removed on exit. The generated image and Docker work volume
+contain the private network profile, so do not publish them. A build without
+Wi-Fi arguments removes the previous build's appliance Wi-Fi profile.
+
 The privileged builder uses Docker's Linux VM and a named work volume; it does
 not mount or write host disks. Output is in `build/linux-appliance/`.
 No commit or push is performed. A failed build is not a usable release.
@@ -33,8 +44,11 @@ The final image must pass them again before export; Pi hardware remains untested
 This is a WHOLE-DISK image, not files to copy over the Circle boot partition.
 Back up existing cartridges and configuration before flashing. No automatic
 migration from Circle is implemented. Do not overwrite the only copy of a game.
+Use Raspberry Pi Imager's custom-image option with the generated `.img.xz`.
+Keep write verification enabled. Do not apply Imager OS customizations over the
+image's preconfigured account and network settings. This erases the entire card.
 
-On the flashed boot partition, rename `tic80-wifi.nmconnection.example` to
+If Wi-Fi was not supplied at build time, on the flashed boot partition rename `tic80-wifi.nmconnection.example` to
 `tic80-wifi.nmconnection` and enter the SSID and WPA password. NetworkManager
 imports it on boot. The boot copy contains plaintext credentials; after a
 successful connection it can be removed. The root-owned internal copy remains.
