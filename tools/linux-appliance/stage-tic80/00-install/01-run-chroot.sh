@@ -1,14 +1,15 @@
 #!/bin/bash -e
 cmake -S /tmp/tic80-source -B /tmp/tic80-build \
     -DCMAKE_BUILD_TYPE=Release -DBUILD_PRO=ON -DBUILD_STATIC=ON \
-    -DBUILD_SDLGPU=ON -DPREFER_SYSTEM_LIBRARIES=ON \
+    -DBUILD_SDLGPU=ON -DBUILD_CRT_FAST=ON -DPREFER_SYSTEM_LIBRARIES=ON \
+    -DBUILD_LOW_LATENCY=ON \
     -DBUILD_WITH_ALL=ON
 cmake --build /tmp/tic80-build --target tic80 -j2
 install -m 755 /tmp/tic80-build/bin/tic80 /usr/local/bin/tic80
 strip /usr/local/bin/tic80
 ldd /usr/local/bin/tic80
 if ldd /usr/local/bin/tic80 | grep -q 'not found'; then exit 1; fi
-xvfb-run -a -s '-screen 0 1280x720x24' python3 /tmp/tic80-smoke.py
+TIC80_SMOKE_FAST_CRT=1 xvfb-run -a -s '-screen 0 1280x720x24' python3 /tmp/tic80-smoke.py
 rm -rf /tmp/tic80-source /tmp/tic80-build
 
 chmod 755 /usr/local/lib/tic80/{launch,session,import-wifi}

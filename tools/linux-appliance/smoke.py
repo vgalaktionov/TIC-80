@@ -46,7 +46,8 @@ with (OUT / 'application.log').open('w') as log:
         else:
             raise AssertionError('Window manager did not become ready')
         app = subprocess.Popen([
-            '/usr/local/bin/tic80', '--fullscreen', '--skip', '--crt', '--fs=' + str(OUT),
+            'stdbuf', '-oL', os.environ.get('TIC80_SMOKE_BINARY', '/usr/local/bin/tic80'),
+            '--fullscreen', '--skip', '--crt', '--fs=' + str(OUT),
         ], env=env, stdout=log, stderr=log)
         time.sleep(5)
         assert app.poll() is None, 'TIC-80 exited during startup'
@@ -75,4 +76,7 @@ with (OUT / 'application.log').open('w') as log:
                     process.wait()
 errors = (OUT / 'application.log').read_text()
 assert 'Failed to load' not in errors and 'Failed to link shader' not in errors, errors
+if os.environ.get('TIC80_SMOKE_FAST_CRT'):
+    assert 'CRT: linear-light filtered renderer' in errors, errors
+    assert 'optimized renderer unavailable' not in errors, errors
 print('PASS: ARM64 startup, fullscreen, visible CRT on/off/on; Xvfb software GL only.')

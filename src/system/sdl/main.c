@@ -28,6 +28,9 @@
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
+#if defined(TIC80_LOW_LATENCY)
+#include <SDL_opengl.h>
+#endif
 
 #ifdef __SWITCH__
 // from studio/studio.h
@@ -40,6 +43,9 @@ extern void gotoMenu(Studio* studio);
 
 #if defined(CRT_SHADER_SUPPORT)
 #include <SDL_gpu.h>
+#if defined(TIC80_CRT_FAST)
+#include "crt-fast.h"
+#endif
 #else
 #include <SDL.h>
 #endif
@@ -268,6 +274,12 @@ static void renderPresent(Renderer renderer)
 #if defined(CRT_SHADER_SUPPORT)
     if(!studio_config(platform.studio)->soft)
     {
+#if defined(TIC80_LOW_LATENCY)
+        // Finish this frame before queuing its swap, keeping input out of a
+        // backlog of GPU work. The appliance retains VSync and its 60 Hz cap.
+        GPU_FlushBlitBuffer();
+        glFinish();
+#endif
         GPU_Flip(renderer.gpu);
     }
     else
@@ -597,6 +609,9 @@ static void initGPU()
 
 static void destroyGPU()
 {
+#if defined(TIC80_CRT_FAST)
+    if(!studio_config(platform.studio)->soft) crt_fast_shutdown();
+#endif
     destoryTexture(platform.screen.texture);
 
 #if defined(TOUCH_INPUT_SUPPORT)
@@ -1795,54 +1810,63 @@ static void gpuTick()
     calcTextureRect(&rect);
 
 #if defined(CRT_SHADER_SUPPORT)
+    if(studio_config(platform.studio)->soft || !studio_config(platform.studio)->options.crt)
+#endif
+    {
+        s32 w, h;
+        SDL_GetWindowSize(platform.window, &w, &h);
+        s32 offset = tic->ram->input.mouse.x < TIC80_FULLHEIGHT / 2
+            ? TIC80_FULLWIDTH-TIC80_OFFSET_LEFT : 0;
+        const SDL_Rect Src[] =
+        {
+            {offset, 0, TIC80_OFFSET_LEFT, TIC80_OFFSET_TOP},
+            {offset, TIC80_FULLHEIGHT-TIC80_OFFSET_TOP, TIC80_OFFSET_LEFT, TIC80_OFFSET_TOP},
+            {offset, 0, TIC80_OFFSET_LEFT, TIC80_FULLHEIGHT},
+            {offset, 0, TIC80_OFFSET_LEFT, TIC80_FULLHEIGHT},
+        };
+        const SDL_Rect Dst[] =
+        {
+            {0, 0, w, rect.y},
+            {0, rect.y + rect.h, w, h - (rect.y + rect.h)},
+            {0, rect.y, rect.x, rect.h},
+            {rect.x + rect.w, rect.y, w - (rect.x + rect.w), rect.h},
+        };
+        // The unfiltered display extends its border into letterbox space.
+        for(s32 i = 0; i < COUNT_OF(Src); ++i)
+            if(Dst[i].w > 0 && Dst[i].h > 0)
+                renderCopy(platform.screen.renderer, platform.screen.texture, Src[i], Dst[i]);
+    }
+
+#if defined(CRT_SHADER_SUPPORT)
 
     if(!studio_config(platform.studio)->soft && studio_config(platform.studio)->options.crt)
     {
-        if(platform.screen.shader == 0)
-            loadCrtShader();
+#if defined(TIC80_CRT_FAST)
+        if(!crt_fast_draw(tic->product.screen, platform.screen.renderer.gpu, rect.x, rect.y, rect.w, rect.h))
+#endif
+        {
+            if(platform.screen.shader == 0)
+                loadCrtShader();
 
-        GPU_ActivateShaderProgram(platform.screen.shader, &platform.screen.block);
+            GPU_ActivateShaderProgram(platform.screen.shader, &platform.screen.block);
 
-        static const char* Uniforms[] = {"trg_x", "trg_y", "trg_w", "trg_h"};
+            static const char* Uniforms[] = {"trg_x", "trg_y", "trg_w", "trg_h"};
 
-        for(s32 i = 0; i < COUNT_OF(Uniforms); ++i)
-            GPU_SetUniformf(GPU_GetUniformLocation(platform.screen.shader, Uniforms[i]), (&rect.x)[i]);
+            for(s32 i = 0; i < COUNT_OF(Uniforms); ++i)
+                GPU_SetUniformf(GPU_GetUniformLocation(platform.screen.shader, Uniforms[i]), (&rect.x)[i]);
 
-        GPU_BlitScale(platform.screen.texture.gpu, NULL, platform.screen.renderer.gpu, rect.x, rect.y,
-            (float)rect.w / TIC80_FULLWIDTH, (float)rect.h / TIC80_FULLHEIGHT);
-        GPU_DeactivateShaderProgram();
+            GPU_BlitScale(platform.screen.texture.gpu, NULL, platform.screen.renderer.gpu, rect.x, rect.y,
+                (float)rect.w / TIC80_FULLWIDTH, (float)rect.h / TIC80_FULLHEIGHT);
+            GPU_DeactivateShaderProgram();
+        }
     }
     else
 
 #endif
 
     {
-        s32 w, h;
-        SDL_GetWindowSize(platform.window, &w, &h);
-
-        s32 offset = tic->ram->input.mouse.x < TIC80_FULLHEIGHT / 2
-            ? TIC80_FULLWIDTH-TIC80_OFFSET_LEFT : 0;
-
-        const SDL_Rect Src[] =
-        {
-            {offset, 0, TIC80_OFFSET_LEFT, TIC80_OFFSET_TOP},                                   // top border
-            {offset, TIC80_FULLHEIGHT-TIC80_OFFSET_TOP, TIC80_OFFSET_LEFT, TIC80_OFFSET_TOP},   // bottom border
-            {offset, 0, TIC80_OFFSET_LEFT, TIC80_FULLHEIGHT},                                   // left border
-            {offset, 0, TIC80_OFFSET_LEFT, TIC80_FULLHEIGHT},                                   // right border
-            {0, 0, TIC80_FULLWIDTH, TIC80_FULLHEIGHT},                                          // center
-        };
-
-        const SDL_Rect Dst[] =
-        {
-            {0, 0, w, rect.y},                                          // top border
-            {0, rect.y + rect.h, w, h - (rect.y + rect.h)},             // bottom border
-            {0, rect.y, rect.x, rect.h},                                // left border
-            {rect.x + rect.w, rect.y, w - (rect.x + rect.w), rect.h},   // right border
-            {rect.x, rect.y, rect.w, rect.h},                           // screen
-        };
-
-        for(s32 i = 0; i < COUNT_OF(Src); ++i)
-            renderCopy(platform.screen.renderer, platform.screen.texture, Src[i], Dst[i]);
+        renderCopy(platform.screen.renderer, platform.screen.texture,
+            (SDL_Rect){0, 0, TIC80_FULLWIDTH, TIC80_FULLHEIGHT}, rect);
     }
 
 #if defined(TOUCH_INPUT_SUPPORT)

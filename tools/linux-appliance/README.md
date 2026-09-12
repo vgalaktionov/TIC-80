@@ -66,8 +66,16 @@ mode despite the kernel setting. The graphical session selects 1080p60 explicitl
 Keyboard repeat uses a 250 ms delay at 30 repeats/second. Libinput pointers use
 the flat profile (no velocity-dependent acceleration), including hotplugged mice.
 
-TIC-80 starts fullscreen at the console, not SURF. F6 enables/disables the
-existing desktop CRT shader; options are saved. Cartridges and configuration
+TIC-80 starts fullscreen at the console, not SURF. F6 enables/disables CRT;
+options are saved. The appliance enables `BUILD_CRT_FAST`: source pixels are
+converted to linear light once, and hardware bilinear sampling combines the
+Gaussian taps. It retains warp, scanlines and the RGB mask at display resolution,
+with a small approximation from dropping faint outer filter tails.
+The screen silhouette follows the same warped coordinates as the picture, with
+a pixel-antialiased boundary and black outside the curved screen. Unsupported
+floating-point textures or shader initialization failures fall back to the
+original desktop shader. This option does not change cartridge rendering or APIs.
+Cartridges and configuration
 live in `/home/tic80/cartridges` on the writable ext4 filesystem. This prototype
 does not yet use a read-only root or a separate data partition. Shut down cleanly;
 it is not designed to tolerate arbitrary power cuts without data loss. Exit
