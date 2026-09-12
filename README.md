@@ -19,6 +19,7 @@
       - [Windows 10 / 11 64-bit (x64)](#windows-10--11-64-bit-x64)
     - [MSYS2 / MINGW](#msys2--mingw)
       - [Windows 10 / 11 64-bit (x64)](#windows-10--11-64-bit-x64-1)
+    - [Cross-compilation with Docker](#cross-compilation-with-docker)
   - [Linux](#linux)
     - [Ubuntu](#ubuntu)
       - [Ubuntu 22.04 (Jammy Jellyfish)](#ubuntu-2204-jammy-jellyfish)
@@ -194,6 +195,21 @@ mingw32-make "-j$numCPUs"
 ```
 
 You'll find `tic80.exe` in `TIC-80\build\bin`.
+
+### Cross-compilation with Docker
+
+To build Windows x64 **PRO with all runtimes** from macOS or Linux:
+
+```sh
+git submodule update --init --recursive
+bash tools/windows-cross/build.sh
+```
+
+Requires Git and a running Docker engine with Linux containers. The build uses
+committed HEAD and its pinned submodules; output is
+`out/windows-cross/<short-commit>/tic80-pro.exe`.
+See the [cross-compilation guide](tools/windows-cross/README.md) for WSL2 setup,
+build details, verification and tested limitations.
 
 ## Linux
 
