@@ -17,6 +17,8 @@ install -m 644 /usr/local/lib/tic80/autologin.conf /etc/systemd/system/getty@tty
 install -m 644 /usr/local/lib/tic80/journal.conf /etc/systemd/journald.conf.d/tic80.conf
 install -m 644 /usr/local/lib/tic80/tic80-wifi.service /etc/systemd/system/
 install -m 644 /usr/local/lib/tic80/profile /home/tic80/.bash_profile
+install -d /etc/X11/xorg.conf.d
+install -m 644 /usr/local/lib/tic80/input.conf /etc/X11/xorg.conf.d/99-tic80-input.conf
 install -m 440 /usr/local/lib/tic80/poweroff.sudoers /etc/sudoers.d/tic80-poweroff
 visudo -cf /etc/sudoers.d/tic80-poweroff
 install -d /etc/wireplumber/wireplumber.conf.d

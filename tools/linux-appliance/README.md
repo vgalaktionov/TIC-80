@@ -56,6 +56,16 @@ Keyfile escaping follows NetworkManager (backslash is `\\`). The default Wi-Fi
 regulatory country is NL; change WPA_COUNTRY in the build config if necessary.
 Ethernet works without configuration. Network readiness does not block TIC-80.
 
+HDMI0 (nearest USB-C power) is forced to 1920x1080 at 60 Hz, including when the
+KVM is switched away at boot. This uses `video=HDMI-A-1:1920x1080@60D` in the
+single-line `cmdline.txt`, not legacy bare-metal `config.txt` HDMI overrides.
+Keep the supplied KMS-enabled `config.txt`. For another display mode or port,
+change that kernel argument on the boot partition and the `xrandr` command in
+`/usr/local/lib/tic80/session`. Xorg otherwise may select an EDID-preferred 4K30
+mode despite the kernel setting. The graphical session selects 1080p60 explicitly.
+Keyboard repeat uses a 250 ms delay at 30 repeats/second. Libinput pointers use
+the flat profile (no velocity-dependent acceleration), including hotplugged mice.
+
 TIC-80 starts fullscreen at the console, not SURF. F6 enables/disables the
 existing desktop CRT shader; options are saved. Cartridges and configuration
 live in `/home/tic80/cartridges` on the writable ext4 filesystem. This prototype

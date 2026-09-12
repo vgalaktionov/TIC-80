@@ -3,6 +3,12 @@ set -eu
 xset s off
 xset -dpms
 xset s noblank
+xset r rate 250 30
+python3 /usr/local/lib/tic80/input-settings.py &
+# The kernel's video= mode does not stop Xorg selecting the EDID's 4K30 mode.
+if ! xrandr --output HDMI-1 --mode 1920x1080 --rate 60; then
+    echo 'Could not select HDMI-1 1080p60; retaining the available display mode.' >&2
+fi
 openbox --config-file /usr/local/lib/tic80/openbox.xml &
 # Wait for EWMH support before SDL requests fullscreen.
 for attempt in $(seq 1 50); do

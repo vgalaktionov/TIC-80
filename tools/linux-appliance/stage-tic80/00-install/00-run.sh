@@ -18,6 +18,8 @@ if [ -f /wifi-secrets/tic80-wifi.nmconnection ]; then
     install -m 600 /wifi-secrets/tic80-wifi.nmconnection \
         "${ROOTFS_DIR}/etc/NetworkManager/system-connections/tic80-wifi.nmconnection"
 fi
+# KMS must expose an output even when the KVM is switched to another computer.
+python3 /appliance/configure-display.py "${ROOTFS_DIR}/boot/firmware/cmdline.txt"
 install -m 644 /appliance/tic80-wifi.nmconnection.example \
     "${ROOTFS_DIR}/boot/firmware/tic80-wifi.nmconnection.example"
 install -m 644 /appliance/README.md "${ROOTFS_DIR}/boot/firmware/TIC80-README.txt"
